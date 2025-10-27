@@ -1,0 +1,16 @@
+# Ignore compiled output and caches
+/target/
+**/*.rs.bk
+
+# Editor or OS junk
+.DS_Store
+.idea/
+.vscode/
+
+# Python-style temporary files if you generate test data
+__pycache__/
+*.pyc
+
+# Local dataset (binary test files)
+dataset/
+
