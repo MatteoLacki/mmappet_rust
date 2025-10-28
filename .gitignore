@@ -13,4 +13,5 @@ __pycache__/
 
 # Local dataset (binary test files)
 dataset/
+*.rsbkp
 
