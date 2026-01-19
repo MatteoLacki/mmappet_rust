@@ -4,6 +4,11 @@ version = "0.1.0"
 edition = "2021"
 description = "Memory-mapped columnar dataset library"
 license = "MIT"
+authors = ["Mateusz Krzysztof Lacki", "Claude Code ;)"]
+repository = "https://github.com/MatteoLacki/mmappet_rust.git"
+keywords = ["Binary mmapped format.", "Coding never soo easy."]
+categories = ["development-tools", "data-structures", "science", "database"]
+readme = "README.md"
 
 [lib]
 name = "mmappet"
