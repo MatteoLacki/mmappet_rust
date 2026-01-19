@@ -6,7 +6,7 @@ description = "Memory-mapped columnar dataset library"
 license = "MIT"
 authors = ["Mateusz Krzysztof Lacki", "Claude Code ;)"]
 repository = "https://github.com/MatteoLacki/mmappet_rust.git"
-keywords = ["Binary format.", "Memmaped df"]
+keywords = ["binary", "memmaped-df"]
 categories = ["development-tools", "data-structures", "science", "database"]
 readme = "README.md"
 
