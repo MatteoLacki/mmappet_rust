@@ -1,12 +1,23 @@
 [package]
-name = "mmappet_reader"
+name = "mmappet"
 version = "0.1.0"
 edition = "2021"
+description = "Memory-mapped columnar dataset library"
+license = "MIT"
+
+[lib]
+name = "mmappet"
+path = "src/lib.rs"
+
+[[bin]]
+name = "mmappet-cli"
+path = "src/bin/mmappet_cli.rs"
 
 [dependencies]
 anyhow = "1"
+bytemuck = "1.13"
 clap = { version = "4.5.50", features = ["derive"] }
 half = "2.7.1"
 memmap2 = "0.9"
 ndarray = "0.15"
-bytemuck = "1.13"
+thiserror = "1.0"
