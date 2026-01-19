@@ -41,6 +41,24 @@ enum Commands {
         /// Path to the mmappet dataset directory
         path: PathBuf,
     },
+
+    /// Plot numeric column values as ASCII bars
+    Plot {
+        /// Path to the mmappet dataset directory
+        path: PathBuf,
+
+        /// Number of rows to show
+        #[arg(short, long, default_value = "30")]
+        n: usize,
+
+        /// Column to plot (uses first numeric column if not specified)
+        #[arg(short, long)]
+        column: Option<String>,
+
+        /// Width of the plot in characters
+        #[arg(short, long, default_value = "60")]
+        width: usize,
+    },
 }
 
 fn main() -> Result<()> {
@@ -50,6 +68,7 @@ fn main() -> Result<()> {
         Commands::Info { path } => cmd_info(&path),
         Commands::Head { path, n, columns } => cmd_head(&path, n, columns),
         Commands::Stats { path } => cmd_stats(&path),
+        Commands::Plot { path, n, column, width } => cmd_plot(&path, n, column, width),
     }
 }
 
@@ -156,6 +175,75 @@ fn cmd_stats(path: &PathBuf) -> Result<()> {
             }
             _ => println!(" (stats not available for this type)"),
         }
+    }
+
+    Ok(())
+}
+
+fn cmd_plot(path: &PathBuf, n: usize, column: Option<String>, width: usize) -> Result<()> {
+    let ds = Dataset::open(path)?;
+
+    // Find column to plot
+    let col_name = match column {
+        Some(name) => name,
+        None => ds.schema().column_names().first()
+            .ok_or_else(|| anyhow::anyhow!("Dataset has no columns"))?
+            .to_string(),
+    };
+
+    let col = ds.column(&col_name)
+        .ok_or_else(|| anyhow::anyhow!("Column not found: {}", col_name))?;
+
+    let n = n.min(ds.len());
+
+    // Extract values as f64 for plotting
+    let values: Vec<f64> = match col.as_typed_array() {
+        TypedArrayView::UInt8(arr) => arr.iter().take(n).map(|&x| x as f64).collect(),
+        TypedArrayView::Int8(arr) => arr.iter().take(n).map(|&x| x as f64).collect(),
+        TypedArrayView::UInt16(arr) => arr.iter().take(n).map(|&x| x as f64).collect(),
+        TypedArrayView::Int16(arr) => arr.iter().take(n).map(|&x| x as f64).collect(),
+        TypedArrayView::UInt32(arr) => arr.iter().take(n).map(|&x| x as f64).collect(),
+        TypedArrayView::Int32(arr) => arr.iter().take(n).map(|&x| x as f64).collect(),
+        TypedArrayView::UInt64(arr) => arr.iter().take(n).map(|&x| x as f64).collect(),
+        TypedArrayView::Int64(arr) => arr.iter().take(n).map(|&x| x as f64).collect(),
+        TypedArrayView::Float32(arr) => arr.iter().take(n).map(|&x| x as f64).collect(),
+        TypedArrayView::Float64(arr) => arr.iter().take(n).copied().collect(),
+        TypedArrayView::Bool(arr) => arr.iter().take(n).map(|&x| x as f64).collect(),
+    };
+
+    if values.is_empty() {
+        println!("No data to plot");
+        return Ok(());
+    }
+
+    // Find min/max for scaling
+    let min_val = values.iter().cloned().fold(f64::INFINITY, f64::min);
+    let max_val = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let range = max_val - min_val;
+
+    // Print header
+    println!("Column: {} ({})  Rows: 0..{}", col_name, col.dtype(), n);
+    println!("Range: [{:.4}, {:.4}]", min_val, max_val);
+    println!();
+
+    // Calculate label width for alignment
+    let max_idx_width = format!("{}", n - 1).len();
+    let val_width = 12;
+
+    // Plot each value as a horizontal bar
+    for (i, &val) in values.iter().enumerate() {
+        let bar_len = if range > 0.0 {
+            ((val - min_val) / range * width as f64).round() as usize
+        } else {
+            width / 2
+        };
+
+        let bar: String = "█".repeat(bar_len);
+
+        println!("{:>idx_w$} │ {:>val_w$.4} │{}",
+            i, val, bar,
+            idx_w = max_idx_width,
+            val_w = val_width);
     }
 
     Ok(())
