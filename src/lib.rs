@@ -27,6 +27,7 @@ mod dataset;
 mod dtype;
 mod error;
 mod schema;
+mod writer;
 
 #[cfg(feature = "ndarray")]
 pub use column::TypedArrayView;
@@ -37,6 +38,7 @@ pub use error::{MmappetError, Result};
 pub use half::f16;
 pub use num_complex::Complex;
 pub use schema::{ColumnDef, Schema};
+pub use writer::{DatasetWriter, Mode, Value, Values};
 
 #[cfg(feature = "ndarray")]
 pub use ndarray::ArrayView1;

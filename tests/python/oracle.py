@@ -90,6 +90,48 @@ def check_filled(path: Path) -> None:
         assert np.array_equal(columns[name], expected[name]), (name, columns[name])
 
 
+def reference_frame(start: int, stop: int) -> pd.DataFrame:
+    """Rows [start, stop) of the reference dataset: column `col <dtype>` for each dtype,
+    row i holding 7i (unsigned), 7i - 10 (signed), i/4 - 1 (float), i/4 - 1 + (i/2)j
+    (complex), i odd (bool) or 1000i - 2000 ticks (time). `tests/oracle.rs` builds the same."""
+    i = np.arange(start, stop)
+    columns = {}
+    for name in DTYPES:
+        dtype = np.dtype(name)
+        if dtype.kind == "u":
+            values = (7 * i).astype(dtype)
+        elif dtype.kind == "i":
+            values = (7 * i - 10).astype(dtype)
+        elif dtype.kind == "f":
+            values = (i / 4 - 1).astype(dtype)
+        elif dtype.kind == "c":
+            values = (i / 4 - 1 + 1j * (i / 2)).astype(dtype)
+        elif dtype.kind == "b":
+            values = i % 2 == 1
+        else:
+            values = (1000 * i - 2000).astype(dtype)
+        columns[f"col {name}"] = values
+    return pd.DataFrame(columns)
+
+
+def reference(path: Path, start: int, stop: int) -> None:
+    """Appends reference rows [start, stop) to the dataset at `path`, creating it if needed."""
+    with DatasetWriter(path, append_ok=path.exists()) as writer:
+        writer.append_df(reference_frame(start, stop))
+
+
+def check_extra(path: Path, nrows: int) -> None:
+    """Raises unless `path` holds reference rows [0, nrows) plus `extra` = 3i as uint16."""
+    columns = open_dataset_dct(path)
+    expected = reference_frame(0, nrows)
+    assert list(columns) == [*expected.columns, "extra"], list(columns)
+    for name in expected.columns:
+        assert columns[name].dtype == expected[name].dtype, name
+        assert np.array_equal(columns[name], expected[name].to_numpy()), name
+    assert columns["extra"].dtype == np.uint16
+    assert np.array_equal(columns["extra"], 3 * np.arange(nrows)), columns["extra"]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -100,6 +142,14 @@ def main() -> None:
     new_types_parser.add_argument("path", type=Path)
     for name in ("spaced-names", "no-rows", "check-filled"):
         commands.add_parser(name).add_argument("path", type=Path)
+    for name in ("reference",):
+        reference_parser = commands.add_parser(name)
+        reference_parser.add_argument("path", type=Path)
+        reference_parser.add_argument("start", type=int)
+        reference_parser.add_argument("stop", type=int)
+    check_extra_parser = commands.add_parser("check-extra")
+    check_extra_parser.add_argument("path", type=Path)
+    check_extra_parser.add_argument("nrows", type=int)
     preallocate_parser = commands.add_parser("preallocate")
     preallocate_parser.add_argument("path", type=Path)
     preallocate_parser.add_argument("nrows", type=int)
@@ -118,6 +168,10 @@ def main() -> None:
         preallocate(args.path, args.nrows)
     elif args.command == "check-filled":
         check_filled(args.path)
+    elif args.command == "reference":
+        reference(args.path, args.start, args.stop)
+    elif args.command == "check-extra":
+        check_extra(args.path, args.nrows)
 
 
 if __name__ == "__main__":

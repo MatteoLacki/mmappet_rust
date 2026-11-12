@@ -26,6 +26,14 @@ Deliberate refusals:
   through pandas, which reads any other numpy unit under a wrong label (`datetime64[D]`
   ticks come back as seconds) and refuses multiples such as `10ms`; Rust refuses them all.
   Python's `DatasetWriter.append` cannot write time columns at all; `append_df` can.
+- `DatasetWriter` refuses `Mode::New` on an existing directory, `AppendOk` with a schema
+  other than the stored one, and `append` columns of unequal length or another dtype (no
+  casting); Python appends to the files there, rewrites `schema.txt`, records the last
+  column's length, and casts.
+
+Python's `append_column` fails ("Corrupted dataset") on a writer that has appended rows:
+its 0-row pandas schema retypes the existing columns. The oracle checks Rust's
+`append_column` through Python's reader instead.
 
 ## Features
 

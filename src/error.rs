@@ -51,6 +51,25 @@ pub enum MmappetError {
 
     #[error("Duplicate column name: {0}")]
     DuplicateColumnName(String),
+
+    #[error("{0} exists; open it with Mode::AppendOk or Mode::OverwriteDir")]
+    AlreadyExists(PathBuf),
+
+    #[error("{path} holds schema [{stored}], not the given [{given}]")]
+    SchemaMismatch {
+        path: PathBuf,
+        stored: String,
+        given: String,
+    },
+
+    #[error("Invalid column name {0:?}: empty, starting with whitespace or holding a newline")]
+    InvalidColumnName(String),
+
+    #[error("A schema needs at least one column")]
+    EmptySchema,
+
+    #[error("Cannot append: {0}")]
+    Append(String),
 }
 
 /// Result type for mmappet operations.

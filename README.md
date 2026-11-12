@@ -8,7 +8,7 @@ This is the Rust equivalent of the Python [mmappet](../mmappet/) library.
 
 **Reading: Complete** - every dtype above, read-only or read-write.
 
-**Writing: Not implemented** - Future work.
+**Writing: Complete** - `DatasetWriter`, byte-identical to Python's for the same data.
 
 ## Installation
 
@@ -71,6 +71,28 @@ Time columns keep their unit in the dtype:
 use mmappet::{DType, Datetime64, TimeUnit};
 let when: &[Datetime64] = ds.get("when")?; // any of s, ms, us, ns
 assert_eq!(ds.column("when")?.dtype(), DType::Datetime64(TimeUnit::Millis));
+```
+
+Writing, after Python's `DatasetWriter`: the schema is given or fixed by the first
+`append`, and columns are passed by name, each of its exact dtype:
+
+```rust
+use mmappet::{DType, DatasetWriter, Mode, Value, Values};
+
+let ids: Vec<u32> = vec![1, 2, 3];
+let scores: Vec<f64> = vec![0.5, 1.5, 2.5];
+let mut writer = DatasetWriter::new("scores.mmappet", Mode::New, None)?; // or AppendOk, OverwriteDir
+writer.append(&[("id", (&ids).into()), ("score", (&scores).into())])?;
+writer.append_row(&[("id", Value::UInt32(4)), ("score", Value::Float64(3.5))])?;
+let flags: Vec<bool> = vec![true, false, true, false];
+writer.append_column("flag", (&flags).into())?; // one value per row so far
+writer.close()?;
+
+// Bytes already in stored form, e.g. a `[u8; 4]` struct column stored as uint32:
+// Values::Raw(DType::UInt32, bytes)
+
+// A zeroed dataset to fill in place with DatasetMut:
+DatasetWriter::preallocate("filled.mmappet", &[("score", DType::Float32)], 1000, false)?;
 ```
 
 With the `ndarray` feature, `ds.get_array::<T>(name)` gives an `ArrayView1<T>` and

@@ -215,3 +215,188 @@ fn taken_columns_leave_the_dataset_and_outlive_it() {
     };
     assert_eq!(&*ids, &[1, 2, 3]);
 }
+
+// ---- Writer ----
+
+use mmappet::{DType, DatasetWriter, Mode, Value, Values};
+
+/// The dtypes the oracle supports, in its order (`oracle.py dtypes`).
+fn oracle_dtypes() -> Vec<DType> {
+    let listing = oracle(&["dtypes"]);
+    let mut dtypes = Vec::new();
+    for line in listing.lines() {
+        let (name, _) = line.split_once('\t').unwrap();
+        dtypes.push(DType::from_str(name).unwrap());
+    }
+    dtypes
+}
+
+/// Row `i` of reference column `dtype`, as `oracle.py`'s `reference_frame` builds it.
+fn reference_value(dtype: DType, i: i64) -> Value {
+    use mmappet::{f16, Complex, Datetime64, Timedelta64};
+    let float = i as f64 / 4.0 - 1.0;
+    let imag = i as f64 / 2.0;
+    match dtype {
+        DType::UInt8 => Value::UInt8((7 * i) as u8),
+        DType::UInt16 => Value::UInt16((7 * i) as u16),
+        DType::UInt32 => Value::UInt32((7 * i) as u32),
+        DType::UInt64 => Value::UInt64((7 * i) as u64),
+        DType::Int8 => Value::Int8((7 * i - 10) as i8),
+        DType::Int16 => Value::Int16((7 * i - 10) as i16),
+        DType::Int32 => Value::Int32((7 * i - 10) as i32),
+        DType::Int64 => Value::Int64(7 * i - 10),
+        DType::Float16 => Value::Float16(f16::from_f64(float)),
+        DType::Float32 => Value::Float32(float as f32),
+        DType::Float64 => Value::Float64(float),
+        DType::Complex64 => Value::Complex64(Complex::new(float as f32, imag as f32)),
+        DType::Complex128 => Value::Complex128(Complex::new(float, imag)),
+        DType::Bool => Value::Bool(i % 2 == 1),
+        DType::Datetime64(unit) => Value::Datetime64(unit, Datetime64(1000 * i - 2000)),
+        DType::Timedelta64(unit) => Value::Timedelta64(unit, Timedelta64(1000 * i - 2000)),
+    }
+}
+
+fn reference_name(dtype: DType) -> String {
+    format!("col {dtype}")
+}
+
+/// Appends reference rows `rows` in one `append`, each column as raw bytes.
+fn append_reference(writer: &mut DatasetWriter, dtypes: &[DType], rows: std::ops::Range<i64>) {
+    let names: Vec<String> = dtypes.iter().map(|&d| reference_name(d)).collect();
+    let mut bytes: Vec<Vec<u8>> = vec![Vec::new(); dtypes.len()];
+    for i in rows {
+        for (column, &dtype) in bytes.iter_mut().zip(dtypes) {
+            column.extend_from_slice(reference_value(dtype, i).as_values().bytes());
+        }
+    }
+    let mut columns = Vec::new();
+    for ((name, column), &dtype) in names.iter().zip(&bytes).zip(dtypes) {
+        columns.push((name.as_str(), Values::Raw(dtype, column)));
+    }
+    writer.append(&columns).unwrap();
+}
+
+/// Appends reference row `i` with `append_row`, each value typed.
+fn append_reference_row(writer: &mut DatasetWriter, dtypes: &[DType], i: i64) {
+    let names: Vec<String> = dtypes.iter().map(|&d| reference_name(d)).collect();
+    let mut row = Vec::new();
+    for (name, &dtype) in names.iter().zip(dtypes) {
+        row.push((name.as_str(), reference_value(dtype, i)));
+    }
+    writer.append_row(&row).unwrap();
+}
+
+/// Every file under `dir`, by relative path, with its bytes.
+fn tree(dir: &Path) -> Vec<(String, Vec<u8>)> {
+    let mut files = Vec::new();
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        files.push((name, std::fs::read(&path).unwrap()));
+    }
+    files.sort();
+    files
+}
+
+fn assert_same_tree(rust: &Path, python: &Path) {
+    let (rust_tree, python_tree) = (tree(rust), tree(python));
+    let names = |t: &[(String, Vec<u8>)]| t.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>();
+    assert_eq!(names(&rust_tree), names(&python_tree));
+    for ((name, rust_bytes), (_, python_bytes)) in rust_tree.iter().zip(&python_tree) {
+        assert!(
+            rust_bytes == python_bytes,
+            "{name} differs:\n rust   {:?}\n python {:?}",
+            String::from_utf8_lossy(rust_bytes),
+            String::from_utf8_lossy(python_bytes)
+        );
+    }
+}
+
+fn python_reference(name: &str, chunks: &[(i64, i64)]) -> PathBuf {
+    let dir = scratch(name);
+    for (start, stop) in chunks {
+        let (start, stop) = (start.to_string(), stop.to_string());
+        oracle(&["reference", dir.to_str().unwrap(), &start, &stop]);
+    }
+    dir
+}
+
+#[test]
+fn rust_writes_the_bytes_python_writes() {
+    let dtypes = oracle_dtypes();
+    let python = python_reference("reference_python", &[(0, 3), (3, 5)]);
+    let rust = scratch("reference_rust");
+    let mut writer = DatasetWriter::new(&rust, Mode::New, None).unwrap();
+    append_reference(&mut writer, &dtypes, 0..3);
+    append_reference_row(&mut writer, &dtypes, 3);
+    append_reference(&mut writer, &dtypes, 4..5);
+    assert_eq!(writer.len(), 5);
+    writer.close().unwrap();
+    assert_same_tree(&rust, &python);
+}
+
+#[test]
+fn rust_and_python_append_to_each_other() {
+    let dtypes = oracle_dtypes();
+    let whole = python_reference("append_whole", &[(0, 5)]);
+
+    let python_first = python_reference("append_python_first", &[(0, 3)]);
+    let mut writer = DatasetWriter::new(&python_first, Mode::AppendOk, None).unwrap();
+    assert_eq!(writer.len(), 3);
+    append_reference(&mut writer, &dtypes, 3..5);
+    writer.close().unwrap();
+    assert_same_tree(&python_first, &whole);
+
+    let rust_first = scratch("append_rust_first");
+    let mut writer = DatasetWriter::new(&rust_first, Mode::New, None).unwrap();
+    append_reference(&mut writer, &dtypes, 0..3);
+    writer.close().unwrap();
+    oracle(&["reference", rust_first.to_str().unwrap(), "3", "5"]);
+    assert_same_tree(&rust_first, &whole);
+}
+
+#[test]
+fn python_reads_a_column_rust_appends() {
+    let dtypes = oracle_dtypes();
+    let dir = scratch("append_column");
+    let mut writer = DatasetWriter::new(&dir, Mode::New, None).unwrap();
+    append_reference(&mut writer, &dtypes, 0..5);
+    let extra: Vec<u16> = (0..5).map(|i| 3 * i).collect();
+    writer.append_column("extra", (&extra).into()).unwrap();
+    writer.close().unwrap();
+    oracle(&["check-extra", dir.to_str().unwrap(), "5"]);
+}
+
+#[test]
+fn rust_preallocates_what_python_preallocates() {
+    use mmappet::{Datetime64, TimeUnit};
+    let nrows = 1000;
+    let python = scratch("preallocate_python");
+    oracle(&["preallocate", python.to_str().unwrap(), &nrows.to_string()]);
+    let rust = scratch("preallocate_rust");
+    let schema = [
+        ("id", DType::UInt32),
+        ("score", DType::Float64),
+        ("when", DType::Datetime64(TimeUnit::Micros)),
+    ];
+    DatasetWriter::preallocate(&rust, &schema, nrows, false).unwrap();
+    assert_same_tree(&rust, &python);
+
+    let mut ds = mmappet::DatasetMut::open(&rust).unwrap();
+    for (i, id) in ds.get_mut::<u32>("id").unwrap().iter_mut().enumerate() {
+        *id = 3 * i as u32;
+    }
+    for (i, score) in ds.get_mut::<f64>("score").unwrap().iter_mut().enumerate() {
+        *score = i as f64 / 2.0;
+    }
+    for (i, when) in ds
+        .get_mut::<Datetime64>("when")
+        .unwrap()
+        .iter_mut()
+        .enumerate()
+    {
+        *when = Datetime64(1000 * i as i64);
+    }
+    drop(ds);
+    oracle(&["check-filled", rust.to_str().unwrap()]);
+}
