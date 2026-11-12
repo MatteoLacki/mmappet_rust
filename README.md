@@ -35,7 +35,7 @@ println!("Columns: {:?}", ds.schema().column_names());
 let tof: &[u32] = ds.get("tof")?;
 let mz: &[f32] = ds.get("mz")?;
 
-// ArrayView1 for ndarray operations
+// ArrayView1 for ndarray operations (feature `ndarray`)
 use mmappet::ArrayView1;
 let scores: ArrayView1<f32> = ds.get_array("score")?;
 println!("Mean score: {}", scores.mean().unwrap());
@@ -56,19 +56,19 @@ match ds["mz"].as_typed_array() {
 
 ```bash
 # Build
-cargo build --release
+cargo build --release --features cli
 
 # Show dataset info
-cargo run --bin mmappet-cli -- info path/to/dataset.mmappet
+cargo run --features cli --bin mmappet-cli -- info path/to/dataset.mmappet
 
 # Show first N rows
-cargo run --bin mmappet-cli -- head path/to/dataset.mmappet -n 10
+cargo run --features cli --bin mmappet-cli -- head path/to/dataset.mmappet -n 10
 
 # Show first N rows of specific columns
-cargo run --bin mmappet-cli -- head path/to/dataset.mmappet -n 5 --columns tof,mz
+cargo run --features cli --bin mmappet-cli -- head path/to/dataset.mmappet -n 5 --columns tof,mz
 
 # Show statistics for numeric columns
-cargo run --bin mmappet-cli -- stats path/to/dataset.mmappet
+cargo run --features cli --bin mmappet-cli -- stats path/to/dataset.mmappet
 ```
 
 ## Supported Data Types
@@ -167,11 +167,11 @@ src/
 ## Running Tests
 
 ```bash
-cargo test
+cargo test   # oracle tests build .venv via `make venv` (needs uv, git)
 ```
 
 ## Building
 
 ```bash
-cargo build --release
+cargo build --release --features cli
 ```

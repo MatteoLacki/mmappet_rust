@@ -28,11 +28,13 @@ mod dtype;
 mod error;
 mod schema;
 
-pub use column::{Column, TypedArrayView};
+pub use column::Column;
+#[cfg(feature = "ndarray")]
+pub use column::TypedArrayView;
 pub use dataset::Dataset;
 pub use dtype::{DType, MmappetType};
 pub use error::{MmappetError, Result};
 pub use schema::{ColumnDef, Schema};
 
-// Re-export commonly used ndarray types for convenience
+#[cfg(feature = "ndarray")]
 pub use ndarray::ArrayView1;

@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::ops::Index;
 use std::path::{Path, PathBuf};
 
+#[cfg(feature = "ndarray")]
 use ndarray::ArrayView1;
 
 use crate::column::Column;
@@ -90,6 +91,7 @@ impl Dataset {
         })
     }
 
+    #[cfg(feature = "ndarray")]
     /// Get a typed ArrayView1 directly by name.
     ///
     /// Returns an error if the column doesn't exist or the type doesn't match.

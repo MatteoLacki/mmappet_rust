@@ -15,3 +15,6 @@ __pycache__/
 dataset/
 *.rsbkp
 
+
+# Python oracle venv (make venv)
+.venv/

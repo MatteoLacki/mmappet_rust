@@ -5,6 +5,7 @@ use std::path::Path;
 
 use bytemuck::cast_slice;
 use memmap2::Mmap;
+#[cfg(feature = "ndarray")]
 use ndarray::ArrayView1;
 
 use crate::dtype::{DType, MmappetType};
@@ -71,6 +72,7 @@ impl Column {
         }
     }
 
+    #[cfg(feature = "ndarray")]
     /// Try to get as ndarray ArrayView1.
     ///
     /// Returns `None` if the requested type doesn't match the column's dtype.
@@ -78,6 +80,7 @@ impl Column {
         self.as_slice::<T>().map(ArrayView1::from)
     }
 
+    #[cfg(feature = "ndarray")]
     /// Get as dynamically-typed array enum.
     pub fn as_typed_array(&self) -> TypedArrayView<'_> {
         match self.dtype {
@@ -97,6 +100,7 @@ impl Column {
 }
 
 /// Enum for dynamically-typed array access.
+#[cfg(feature = "ndarray")]
 pub enum TypedArrayView<'a> {
     UInt8(ArrayView1<'a, u8>),
     Int8(ArrayView1<'a, i8>),
@@ -111,6 +115,7 @@ pub enum TypedArrayView<'a> {
     Bool(ArrayView1<'a, u8>), // Bool stored as u8
 }
 
+#[cfg(feature = "ndarray")]
 impl<'a> TypedArrayView<'a> {
     /// Get the number of elements.
     pub fn len(&self) -> usize {

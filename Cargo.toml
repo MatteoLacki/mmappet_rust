@@ -1,6 +1,6 @@
 [package]
 name = "mmappet"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Memory-mapped columnar dataset library"
 license = "MIT"
@@ -17,12 +17,19 @@ path = "src/lib.rs"
 [[bin]]
 name = "mmappet-cli"
 path = "src/bin/mmappet_cli.rs"
+required-features = ["cli"]
+
+[features]
+default = []
+cli = ["dep:clap", "dep:anyhow", "ndarray"]
+ndarray = ["dep:ndarray"]
 
 [dependencies]
-anyhow = "1"
+anyhow = { version = "1", optional = true }
 bytemuck = "1.13"
-clap = { version = "4.5.50", features = ["derive"] }
-half = "2.7.1"
+clap = { version = "4.5.50", features = ["derive"], optional = true }
+half = { version = "2.7.1", features = ["bytemuck"] }
 memmap2 = "0.9"
-ndarray = "0.15"
+ndarray = { version = "0.15", optional = true }
+num-complex = { version = "0.4", features = ["bytemuck"] }
 thiserror = "1.0"
