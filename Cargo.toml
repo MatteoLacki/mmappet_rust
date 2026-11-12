@@ -9,6 +9,7 @@ repository = "https://github.com/MatteoLacki/mmappet_rust.git"
 keywords = ["binary", "memmaped-df"]
 categories = ["development-tools", "data-structures", "science", "database"]
 readme = "README.md"
+include = ["src/**", "README.md", "Cargo.toml"]
 
 [lib]
 name = "mmappet"
@@ -33,3 +34,6 @@ memmap2 = "0.9"
 ndarray = { version = "0.15", optional = true }
 num-complex = { version = "0.4", features = ["bytemuck"] }
 thiserror = "1.0"
+
+[package.metadata.docs.rs]
+all-features = true

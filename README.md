@@ -2,7 +2,8 @@
 
 Rust library for mmappet datasets - memory-mapped columnar data format.
 
-This is the Rust equivalent of the Python [mmappet](../mmappet/) library.
+The Rust copy of the Python [mmappet](https://github.com/michalsta/mmappet) package: same
+on-disk format, same bytes written, checked against the Python package by the tests.
 
 ## Status
 
@@ -14,7 +15,14 @@ This is the Rust equivalent of the Python [mmappet](../mmappet/) library.
 
 ```toml
 [dependencies]
-mmappet = { path = "../mmappet_rust" }
+mmappet = "0.2"
+```
+
+Features: `ndarray` (array views) and `cli` (the `mmappet-cli` binary), both off by default.
+The CLI installs with:
+
+```bash
+cargo install mmappet --features cli
 ```
 
 ## Usage
@@ -206,33 +214,34 @@ mz: min=192.982727, max=1690.030396, mean=654.013775
 src/
 ├── lib.rs          # Public API re-exports
 ├── error.rs        # MmappetError enum
-├── dtype.rs        # DType enum, MmappetType trait
-├── schema.rs       # Schema parsing
-├── column.rs       # Column, TypedArrayView
-├── dataset.rs      # Dataset (main entry point)
+├── dtype.rs        # DType, TimeUnit, Datetime64/Timedelta64, MmappetType
+├── schema.rs       # schema.txt parsing
+├── column.rs       # Column, Typed<T>, TypedArrayView
+├── dataset.rs      # Dataset (read-only), DatasetMut (read-write)
+├── writer.rs       # DatasetWriter, Values, Value, truncate
+├── lock.rs         # Lock: flock on the directory or write.lock
 └── bin/
-    └── mmappet_cli.rs  # CLI tool
+    └── mmappet_cli.rs  # CLI tool (feature `cli`)
 ```
 
 ## Dependencies
 
 - `memmap2` - Memory-mapped file I/O
-- `ndarray` - N-dimensional arrays
 - `bytemuck` - Zero-copy type casting
+- `half`, `num-complex` - float16 and complex values
 - `thiserror` - Error derive macros
-- `clap` - CLI argument parsing
-- `anyhow` - CLI error handling
+- `ndarray` - Array views (feature `ndarray`)
+- `clap`, `anyhow` - CLI (feature `cli`)
 
 ## Future Work
 
-- [ ] Write support (`DatasetWriter` equivalent)
-- [ ] Append to existing datasets
-- [ ] Pre-allocation for zero-copy writes
 - [ ] Lazy column loading (only mmap on first access)
 - [ ] Iterator support for row-wise access
 - [ ] Polars/Arrow integration
 
 ## Running Tests
+
+From a clone of the repository (the oracle tests are not in the published crate):
 
 ```bash
 cargo test   # oracle tests build .venv via `make venv` (needs uv, git)
