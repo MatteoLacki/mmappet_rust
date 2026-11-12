@@ -471,3 +471,302 @@ fn a_python_flock_stops_rust_writers_until_its_holder_dies() {
         assert_eq!(writer.len(), 3);
     }
 }
+
+// ---- Random round trips (`oracle.py` draws the same shapes) ----
+
+const SEEDS: usize = 20;
+const NAMES: [&str; 10] = [
+    "a",
+    "mz",
+    "rt",
+    "retention time",
+    "charge state",
+    "x y z",
+    "id",
+    "score",
+    "intensity",
+    "col 7",
+];
+
+/// splitmix64: a few lines, no `rand`.
+struct SplitMix(u64);
+
+impl SplitMix {
+    fn next(&mut self) -> u64 {
+        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = self.0;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    }
+
+    fn below(&mut self, n: usize) -> usize {
+        (self.next() % n as u64) as usize
+    }
+
+    fn chance(&mut self, p: f64) -> bool {
+        ((self.next() >> 11) as f64 / (1u64 << 53) as f64) < p
+    }
+}
+
+/// Runs `$body` with `$t` the Rust type `$dtype` is read as.
+macro_rules! with_type {
+    ($dtype:expr, $t:ident => $body:expr) => {
+        match $dtype {
+            DType::UInt8 | DType::Bool => {
+                type $t = u8;
+                $body
+            }
+            DType::Int8 => {
+                type $t = i8;
+                $body
+            }
+            DType::UInt16 => {
+                type $t = u16;
+                $body
+            }
+            DType::Int16 => {
+                type $t = i16;
+                $body
+            }
+            DType::UInt32 => {
+                type $t = u32;
+                $body
+            }
+            DType::Int32 => {
+                type $t = i32;
+                $body
+            }
+            DType::UInt64 => {
+                type $t = u64;
+                $body
+            }
+            DType::Int64 => {
+                type $t = i64;
+                $body
+            }
+            DType::Float16 => {
+                type $t = mmappet::f16;
+                $body
+            }
+            DType::Float32 => {
+                type $t = f32;
+                $body
+            }
+            DType::Float64 => {
+                type $t = f64;
+                $body
+            }
+            DType::Complex64 => {
+                type $t = mmappet::Complex<f32>;
+                $body
+            }
+            DType::Complex128 => {
+                type $t = mmappet::Complex<f64>;
+                $body
+            }
+            DType::Datetime64(_) => {
+                type $t = mmappet::Datetime64;
+                $body
+            }
+            DType::Timedelta64(_) => {
+                type $t = mmappet::Timedelta64;
+                $body
+            }
+        }
+    };
+}
+
+/// Random bits for numbers, 0/1 for bool, and ticks within pandas' range with some NaT for
+/// time, as `oracle.py`'s `random_values`.
+fn random_bytes(rng: &mut SplitMix, dtype: DType, nrows: usize) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(nrows * dtype.size_bytes());
+    for _ in 0..nrows {
+        match dtype {
+            DType::Bool => bytes.push(rng.below(2) as u8),
+            DType::Datetime64(_) | DType::Timedelta64(_) => {
+                let ticks = if rng.chance(0.1) {
+                    i64::MIN
+                } else {
+                    rng.below(1 << 41) as i64 - (1 << 40)
+                };
+                bytes.extend_from_slice(&ticks.to_ne_bytes());
+            }
+            _ => {
+                for _ in 0..dtype.size_bytes() {
+                    bytes.push(rng.next() as u8);
+                }
+            }
+        }
+    }
+    bytes
+}
+
+type Schema = Vec<(String, DType)>;
+
+fn random_schema(rng: &mut SplitMix, dtypes: &[DType]) -> (Schema, usize) {
+    let mut names: Vec<&str> = NAMES.to_vec();
+    let ncols = 1 + rng.below(8);
+    let mut schema = Vec::new();
+    for _ in 0..ncols {
+        let name = names.remove(rng.below(names.len()));
+        schema.push((name.to_string(), dtypes[rng.below(dtypes.len())]));
+    }
+    let nrows = match rng.below(3) {
+        0 => 0,
+        1 => 1,
+        _ => 2 + rng.below(999),
+    };
+    (schema, nrows)
+}
+
+fn random_chunks(rng: &mut SplitMix, nrows: usize) -> Vec<std::ops::Range<usize>> {
+    let mut bounds = vec![0, nrows];
+    if nrows > 1 {
+        for _ in 0..rng.below(5) {
+            bounds.push(1 + rng.below(nrows - 1));
+        }
+    }
+    bounds.sort();
+    bounds.dedup();
+    bounds.windows(2).map(|w| w[0]..w[1]).collect()
+}
+
+/// Writes `columns` (stored bytes, in `schema` order) in random chunks, sometimes closing
+/// and reopening with `AppendOk` between them.
+fn write_in_chunks(rng: &mut SplitMix, path: &Path, schema: &Schema, columns: &[Vec<u8>]) {
+    let schema_refs: Vec<(&str, DType)> = schema.iter().map(|(n, d)| (n.as_str(), *d)).collect();
+    let nrows = columns[0].len() / schema[0].1.size_bytes();
+    let mut writer = DatasetWriter::new(path, Mode::OverwriteDir, Some(&schema_refs)).unwrap();
+    for rows in random_chunks(rng, nrows) {
+        if rng.chance(0.3) {
+            writer.close().unwrap();
+            writer = DatasetWriter::new(path, Mode::AppendOk, Some(&schema_refs)).unwrap();
+        }
+        let mut chunk = Vec::new();
+        for ((name, dtype), bytes) in schema.iter().zip(columns) {
+            let size = dtype.size_bytes();
+            chunk.push((
+                name.as_str(),
+                Values::Raw(*dtype, &bytes[rows.start * size..rows.end * size]),
+            ));
+        }
+        writer.append(&chunk).unwrap();
+    }
+    writer.close().unwrap();
+}
+
+#[test]
+fn rust_rewrites_random_python_datasets_byte_for_byte() {
+    let python = scratch("random_python");
+    oracle(&["gen", python.to_str().unwrap(), &SEEDS.to_string()]);
+    let rust = scratch("random_python_rewritten");
+    for seed in 0..SEEDS {
+        eprintln!("seed {seed}");
+        let source = python.join(seed.to_string());
+        let ds = mmappet::Dataset::open(&source).unwrap();
+        let schema: Schema = ds
+            .schema()
+            .columns()
+            .map(|d| (d.name.clone(), d.dtype))
+            .collect();
+        let mut columns = Vec::new();
+        for (name, dtype) in &schema {
+            let raw = ds.column(name).unwrap().as_bytes().to_vec();
+            let typed: Vec<u8> =
+                with_type!(*dtype, T => bytemuck::cast_slice(ds.get::<T>(name).unwrap()).to_vec());
+            assert_eq!(typed, raw, "{name}");
+            columns.push(raw);
+        }
+        let target = rust.join(seed.to_string());
+        write_in_chunks(&mut SplitMix(seed as u64), &target, &schema, &columns);
+        assert_same_tree(&target, &source);
+
+        let keep: usize = std::fs::read_to_string(python.join(format!("{seed}.crop.rows")))
+            .unwrap()
+            .parse()
+            .unwrap();
+        mmappet::truncate(&target, keep).unwrap();
+        assert_same_tree(&target, &python.join(format!("{seed}.crop")));
+    }
+}
+
+#[test]
+fn python_rewrites_random_rust_datasets_byte_for_byte() {
+    let dtypes = oracle_dtypes();
+    let rust = scratch("random_rust");
+    for seed in 0..SEEDS {
+        let mut rng = SplitMix(100 + seed as u64);
+        let (schema, nrows) = random_schema(&mut rng, &dtypes);
+        let columns: Vec<Vec<u8>> = schema
+            .iter()
+            .map(|(_, d)| random_bytes(&mut rng, *d, nrows))
+            .collect();
+        write_in_chunks(&mut rng, &rust.join(seed.to_string()), &schema, &columns);
+    }
+    let python = scratch("random_rust_rewritten");
+    oracle(&[
+        "copy",
+        rust.to_str().unwrap(),
+        python.to_str().unwrap(),
+        &SEEDS.to_string(),
+    ]);
+    for seed in 0..SEEDS {
+        eprintln!("seed {seed}");
+        assert_same_tree(&python.join(seed.to_string()), &rust.join(seed.to_string()));
+    }
+}
+
+#[test]
+fn rust_fills_random_python_preallocations_as_its_writer_writes() {
+    let root = scratch("random_python_preallocated");
+    oracle(&[
+        "preallocate-random",
+        root.to_str().unwrap(),
+        &SEEDS.to_string(),
+    ]);
+    for seed in 0..SEEDS {
+        eprintln!("seed {seed}");
+        let filled = root.join(seed.to_string());
+        let mut rng = SplitMix(200 + seed as u64);
+        let mut ds = mmappet::DatasetMut::open(&filled).unwrap();
+        let schema: Schema = ds
+            .schema()
+            .columns()
+            .map(|d| (d.name.clone(), d.dtype))
+            .collect();
+        let mut columns = Vec::new();
+        for (name, dtype) in &schema {
+            let bytes = random_bytes(&mut rng, *dtype, ds.len());
+            with_type!(*dtype, T => bytemuck::cast_slice_mut::<T, u8>(ds.get_mut::<T>(name).unwrap()).copy_from_slice(&bytes));
+            columns.push(bytes);
+        }
+        drop(ds);
+        let written = root.join(format!("{seed}.written"));
+        write_in_chunks(&mut rng, &written, &schema, &columns);
+        assert_same_tree(&filled, &written);
+    }
+}
+
+#[test]
+fn python_fills_random_rust_preallocations_as_its_writer_writes() {
+    let dtypes = oracle_dtypes();
+    let root = scratch("random_rust_preallocated");
+    std::fs::create_dir_all(&root).unwrap();
+    for seed in 0..SEEDS {
+        let mut rng = SplitMix(300 + seed as u64);
+        let (schema, nrows) = random_schema(&mut rng, &dtypes);
+        let schema_refs: Vec<(&str, DType)> =
+            schema.iter().map(|(n, d)| (n.as_str(), *d)).collect();
+        DatasetWriter::preallocate(root.join(seed.to_string()), &schema_refs, nrows, false)
+            .unwrap();
+    }
+    oracle(&["fill", root.to_str().unwrap(), &SEEDS.to_string()]);
+    for seed in 0..SEEDS {
+        eprintln!("seed {seed}");
+        assert_same_tree(
+            &root.join(seed.to_string()),
+            &root.join(format!("{seed}.written")),
+        );
+    }
+}
