@@ -15,8 +15,8 @@ use crate::dtype::{DType, MmappetType};
 use crate::error::{MmappetError, Result};
 use crate::schema::Schema;
 
-/// A dataset mapped read-only. Columns can be borrowed (`get`) or shared (`typed`, `column`
-/// clones), which keeps their maps alive after the `Dataset` is dropped.
+/// A dataset mapped read-only. Columns can be borrowed (`get`), shared (`typed`, `column`
+/// clones) or moved out (`take`); shared and moved columns outlive the `Dataset`.
 pub struct Dataset {
     path: PathBuf,
     schema: Schema,
@@ -74,6 +74,24 @@ impl Dataset {
     pub fn typed<T: MmappetType>(&self, name: &str) -> Result<Typed<T>> {
         let column = self.column(name)?;
         Typed::new(column.clone()).ok_or_else(|| type_mismatch::<T>(name, column.dtype()))
+    }
+
+    /// Moves the column `name` out as `T`: it is no longer in the `Dataset`, and the caller
+    /// is its only owner. On a wrong dtype the column stays.
+    pub fn take<T: MmappetType>(&mut self, name: &str) -> Result<Typed<T>> {
+        let dtype = self.column(name)?.dtype();
+        if !T::accepts(dtype) {
+            return Err(type_mismatch::<T>(name, dtype));
+        }
+        let column = self.take_column(name)?;
+        Ok(Typed::new(column).expect("dtype checked above"))
+    }
+
+    /// Moves the column `name` out, raw.
+    pub fn take_column(&mut self, name: &str) -> Result<Column> {
+        self.columns
+            .remove(name)
+            .ok_or_else(|| MmappetError::ColumnNotFound(name.to_string()))
     }
 
     #[cfg(feature = "ndarray")]

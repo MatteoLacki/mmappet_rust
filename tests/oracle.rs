@@ -195,3 +195,23 @@ fn python_reads_what_rust_fills_in_place() {
     drop(ds);
     oracle(&["check-filled", dir.to_str().unwrap()]);
 }
+
+#[test]
+fn taken_columns_leave_the_dataset_and_outlive_it() {
+    let dir = scratch("take");
+    oracle(&["smoke", dir.to_str().unwrap()]);
+    let ids = {
+        let mut ds = mmappet::Dataset::open(&dir).unwrap();
+        assert!(ds.take::<f32>("id").is_err());
+        assert!(
+            ds.get::<u32>("id").is_ok(),
+            "a wrong dtype leaves the column"
+        );
+        let ids = ds.take::<u32>("id").unwrap();
+        assert!(ds.get::<u32>("id").is_err());
+        assert!(ds.take_column("id").is_err());
+        assert_eq!(ds.get::<f64>("score").unwrap(), &[0.5, 1.5, 2.5]);
+        ids
+    };
+    assert_eq!(&*ids, &[1, 2, 3]);
+}

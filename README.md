@@ -1,12 +1,12 @@
 # mmappet (Rust)
 
-Rust library for reading mmappet datasets - memory-mapped columnar data format.
+Rust library for mmappet datasets - memory-mapped columnar data format.
 
 This is the Rust equivalent of the Python [mmappet](../mmappet/) library.
 
 ## Status
 
-**Reading: Complete** - Full support for reading mmappet datasets with all dtypes.
+**Reading: Complete** - every dtype above, read-only or read-write.
 
 **Writing: Not implemented** - Future work.
 
@@ -22,35 +22,59 @@ mmappet = { path = "../mmappet_rust" }
 ### Library API
 
 ```rust
-use mmappet::Dataset;
+use mmappet::{Dataset, DatasetMut, Typed};
 
-// Open a dataset
-let ds = Dataset::open("data.mmappet")?;
+let ds = Dataset::open("precursors.mmappet")?;
+println!("{} rows, columns {:?}", ds.len(), ds.schema().column_names());
 
-// Check schema
-println!("Rows: {}", ds.len());
-println!("Columns: {:?}", ds.schema().column_names());
+// Borrow: slices live as long as `ds`; the dtype is checked against the Rust type.
+let mz: &[f64] = ds.get("mz")?;
+let charge: &[i64] = ds.get("charges")?;
+let ppm_lo: Option<&[f64]> = ds.get_opt("ppm_tol_lo")?; // missing -> None, wrong dtype -> Err
 
-// Typed access (compile-time checked)
-let tof: &[u32] = ds.get("tof")?;
-let mz: &[f32] = ds.get("mz")?;
-
-// ArrayView1 for ndarray operations (feature `ndarray`)
-use mmappet::ArrayView1;
-let scores: ArrayView1<f32> = ds.get_array("score")?;
-println!("Mean score: {}", scores.mean().unwrap());
-
-// Dictionary-style access (runtime type)
-let col = &ds["intensity"];
-println!("dtype: {}, len: {}", col.dtype(), col.len());
-
-// Dynamic typed access
-use mmappet::TypedArrayView;
-match ds["mz"].as_typed_array() {
-    TypedArrayView::Float32(arr) => println!("First mz: {}", arr[0]),
-    _ => {}
-}
+// Raw: dtype and bytes, e.g. to pick f32 or f64 at run time.
+let column = ds.column("mz")?;
+println!("{} values of {}", column.len(), column.dtype());
 ```
+
+A column can also outlive its `Dataset`, to be kept in a struct or handed to another
+owner. There are two ways:
+
+```rust
+// Share: `ds` keeps the column too. Clones share one map, freed with the last of them.
+let ds = Dataset::open("speclib/arrays.mmappet")?;
+let intensity: Typed<mmappet::f16> = ds.typed("predicted_intensity")?;
+let annotation = ds.column("annotation_id")?.clone(); // raw, `AsRef<[u8]>`
+drop(ds);
+let first: mmappet::f16 = intensity[0]; // `Typed<T>` derefs to `&[T]`
+
+// Move: the column leaves `ds`, and the caller is its only owner.
+let mut ds = Dataset::open("speclib/index.mmappet")?;
+let start: Typed<u64> = ds.take("start")?;
+assert!(ds.get::<u64>("start").is_err()); // gone from `ds`
+drop(ds);
+let bounds: &[u64] = &start;
+```
+
+Read-write, to fill a dataset in place (e.g. one made with Python's
+`DatasetWriter.preallocate_dataset`). Its columns can only be borrowed:
+
+```rust
+let mut ds = DatasetMut::open("scores.mmappet")?;
+ds.get_mut::<f32>("score")?.fill(0.0);
+ds.flush()?;
+```
+
+Time columns keep their unit in the dtype:
+
+```rust
+use mmappet::{DType, Datetime64, TimeUnit};
+let when: &[Datetime64] = ds.get("when")?; // any of s, ms, us, ns
+assert_eq!(ds.column("when")?.dtype(), DType::Datetime64(TimeUnit::Millis));
+```
+
+With the `ndarray` feature, `ds.get_array::<T>(name)` gives an `ArrayView1<T>` and
+`column.as_typed_array()` a `TypedArrayView` matched on the dtype.
 
 ### CLI Tool
 
@@ -83,9 +107,17 @@ cargo run --features cli --bin mmappet-cli -- stats path/to/dataset.mmappet
 | `int32` | `i32` | `i32` |
 | `uint64` | `u64` | `u64`, `size_t` |
 | `int64` | `i64` | `i64` |
+| `float16` | `mmappet::f16` | `f16`, `half` |
 | `float32` | `f32` | `f32` |
 | `float64` | `f64` | `f64`, `double` |
+| `complex64` | `mmappet::Complex<f32>` | `c64` |
+| `complex128` | `mmappet::Complex<f64>` | `c128` |
 | `bool` | `u8` | `boolean` |
+| `datetime64[s\|ms\|us\|ns]` | `mmappet::Datetime64` (i64 ticks, NaT = `i64::MIN`) | |
+| `timedelta64[s\|ms\|us\|ns]` | `mmappet::Timedelta64` | |
+
+Other numpy time units (`D`, `M`, `10ms`, ...) are refused: Python mmappet reads them
+under a wrong unit (see `AI.md`).
 
 ## File Format
 
