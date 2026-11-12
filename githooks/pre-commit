@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# rustfmt every staged .rs file and re-stage it. A file that also has unstaged changes, or
+# does not parse, is refused instead: re-adding it would commit the unstaged part.
+# `git commit --no-verify` skips this.
+set -uo pipefail
+command -v rustfmt >/dev/null || exit 0
+root=$(git rev-parse --show-toplevel) || exit 1
+edition=$(grep -m1 -oP '^edition\s*=\s*"\K[0-9]+' "$root/Cargo.toml" || echo 2021)
+refused=()
+# rustfmt reads stdin: given a path it would also format every out-of-line `mod` child.
+while IFS= read -r -d '' rel; do
+    git show ":$rel" | rustfmt --edition "$edition" 2>/dev/null | cmp -s - <(git show ":$rel") && continue
+    formatted=$(mktemp)
+    if git diff --quiet -- "$rel" && rustfmt --edition "$edition" <"$root/$rel" >"$formatted" 2>/dev/null; then
+        cat "$formatted" >"$root/$rel"
+        git add -- "$rel" && echo "rustfmt: formatted $rel"
+    else
+        refused+=("$rel")
+    fi
+    rm -f "$formatted"
+done < <(git diff --cached --name-only -z --diff-filter=ACMR -- '*.rs')
+[[ ${#refused[@]} -eq 0 ]] && exit 0
+echo "rustfmt: not formatted and partly staged, or does not parse:"
+printf '  %s\n' "${refused[@]}"
+echo "Run cargo fmt, git add, and commit again."
+exit 1

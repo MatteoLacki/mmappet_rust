@@ -3,9 +3,13 @@ PYTHON_VERSION = 3.12
 # The Python mmappet the oracle tests compare against.
 MMAPPET_PY = git+https://github.com/michalsta/mmappet.git@8c6e9a3131e1d1e8c2a0982efa801d84f8191bab
 
-.PHONY: venv test clean-venv
+.PHONY: venv hooks test clean-venv
 
 venv: .venv/.stamp
+
+# Use githooks/ (rustfmt on commit) instead of .git/hooks.
+hooks:
+	git config core.hooksPath githooks
 
 .venv/.stamp: Makefile
 	$(UV) venv --allow-existing --python $(PYTHON_VERSION) .venv

@@ -29,6 +29,13 @@ The library has no default features. `cli` (the `mmappet-cli` binary) pulls in `
 `anyhow` and `ndarray`; `ndarray` alone adds the `ArrayView1` accessors. Keep `clap` and
 `ndarray` out of the default build: downstream users (SAGE) take only the library.
 
+## Formatting
+
+Every `.rs` file is rustfmt-clean. Agents: run `rustfmt --edition 2021 <file>` after every
+write or edit of a `.rs` file, as a post-edit hook where the agent has hooks (Claude Code:
+`PostToolUse` on `Write|Edit`), else by hand. `make hooks` points git at `githooks/`, whose
+`pre-commit` formats and re-stages staged `.rs` files and refuses partly staged ones.
+
 ## Docs
 
 Present tense, only what the code cannot say, about 60 lines; history goes in commit
