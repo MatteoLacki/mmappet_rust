@@ -5,7 +5,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from mmappet import DatasetWriter
+from mmappet import DatasetWriter, open_dataset_dct
 
 # Every dtype the crate supports. Time columns hold only the units pandas keeps.
 DTYPES = [
@@ -46,6 +46,50 @@ def new_types(path: Path) -> None:
         writer.append_df(frame)
 
 
+def spaced_names(path: Path) -> None:
+    """2 rows; column names with spaces in them."""
+    frame = pd.DataFrame(
+        {
+            "retention time": np.array([1.5, 2.5]),
+            "charge state": np.array([2, 3], dtype=np.int8),
+        }
+    )
+    with DatasetWriter(path, overwrite_dir=True) as writer:
+        writer.append_df(frame)
+
+
+def no_rows(path: Path) -> None:
+    """A schema and empty column files."""
+    DatasetWriter.new(path, overwrite_dir=True, id=np.uint32, score=np.float64).close()
+
+
+FILLED = {"id": "uint32", "score": "float64", "when": "datetime64[us]"}
+
+
+def filled_values(n: int) -> dict:
+    """What `preallocate`d columns hold once filled: row i is (3i, i/2, 1000i)."""
+    i = np.arange(n)
+    return {
+        "id": (3 * i).astype(np.uint32),
+        "score": i / 2,
+        "when": (1000 * i).astype("datetime64[us]"),
+    }
+
+
+def preallocate(path: Path, nrows: int) -> None:
+    schema = pd.DataFrame({name: np.empty(0, dtype=dtype) for name, dtype in FILLED.items()})
+    DatasetWriter.preallocate_dataset(path, schema, nrows=nrows, overwrite_dir=True)
+
+
+def check_filled(path: Path) -> None:
+    """Raises unless the dataset at `path` holds `filled_values`."""
+    columns = open_dataset_dct(path)
+    expected = filled_values(len(columns["id"]))
+    for name, dtype in FILLED.items():
+        assert columns[name].dtype == np.dtype(dtype), (name, columns[name].dtype)
+        assert np.array_equal(columns[name], expected[name]), (name, columns[name])
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -54,6 +98,11 @@ def main() -> None:
     commands.add_parser("dtypes", help="print name and itemsize of each supported dtype")
     new_types_parser = commands.add_parser("new-types", help="write one column per new type")
     new_types_parser.add_argument("path", type=Path)
+    for name in ("spaced-names", "no-rows", "check-filled"):
+        commands.add_parser(name).add_argument("path", type=Path)
+    preallocate_parser = commands.add_parser("preallocate")
+    preallocate_parser.add_argument("path", type=Path)
+    preallocate_parser.add_argument("nrows", type=int)
     args = parser.parse_args()
     if args.command == "smoke":
         smoke(args.path)
@@ -61,6 +110,14 @@ def main() -> None:
         dtypes()
     elif args.command == "new-types":
         new_types(args.path)
+    elif args.command == "spaced-names":
+        spaced_names(args.path)
+    elif args.command == "no-rows":
+        no_rows(args.path)
+    elif args.command == "preallocate":
+        preallocate(args.path, args.nrows)
+    elif args.command == "check-filled":
+        check_filled(args.path)
 
 
 if __name__ == "__main__":

@@ -26,32 +26,33 @@ pub struct Schema {
 }
 
 impl Schema {
-    /// Parse schema from schema.txt content.
-    ///
-    /// Format: `{dtype} {colname}` per line (e.g., "uint32 tof")
+    /// Parse `schema.txt`: one `<dtype> <name>` line per column, split at the first run of
+    /// whitespace as Python's `line.split(maxsplit=1)` does, so a name may hold spaces.
+    /// Blank lines are skipped.
     pub fn parse(content: &str) -> Result<Self> {
         let mut columns = Vec::new();
         let mut name_to_index = HashMap::new();
 
         for (line_num, line) in content.lines().enumerate() {
-            let line = line.trim();
-
-            // Skip empty lines
+            let line = line.trim_start();
             if line.is_empty() {
                 continue;
             }
-
-            // Split into dtype and name
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() != 2 {
+            let Some((dtype, name)) = line.split_once(char::is_whitespace) else {
+                return Err(MmappetError::SchemaParse {
+                    line: line_num + 1,
+                    message: format!("Expected 'dtype name', got: {}", line),
+                });
+            };
+            let name = name.trim_start();
+            if name.is_empty() {
                 return Err(MmappetError::SchemaParse {
                     line: line_num + 1,
                     message: format!("Expected 'dtype name', got: {}", line),
                 });
             }
-
-            let dtype = DType::from_str(parts[0])?;
-            let name = parts[1].to_string();
+            let dtype = DType::from_str(dtype)?;
+            let name = name.to_string();
 
             // Check for duplicates
             if name_to_index.contains_key(&name) {
@@ -149,8 +150,14 @@ mod tests {
     }
 
     #[test]
+    fn names_may_hold_spaces() {
+        let schema = Schema::parse("uint32 retention time\nfloat64  mz ").unwrap();
+        assert_eq!(schema.column_names(), vec!["retention time", "mz "]);
+    }
+
+    #[test]
     fn test_parse_schema_invalid_format() {
-        let content = "invalid line format here";
+        let content = "uint32";
         let result = Schema::parse(content);
         assert!(matches!(result, Err(MmappetError::SchemaParse { .. })));
     }

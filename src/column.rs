@@ -1,7 +1,9 @@
 //! Column types for mmappet datasets.
 
 use std::fs::File;
-use std::path::Path;
+use std::marker::PhantomData;
+use std::ops::Deref;
+use std::sync::Arc;
 
 #[cfg(feature = "ndarray")]
 use crate::dtype::{Datetime64, TimeUnit, Timedelta64};
@@ -15,64 +17,57 @@ use ndarray::ArrayView1;
 use num_complex::Complex;
 
 use crate::dtype::{DType, MmappetType};
-use crate::error::{MmappetError, Result};
+use crate::error::Result;
 
-/// Type-erased column data holding the mmap and metadata.
+/// One column, mapped read-only. Clones share the map, which lives as long as any clone,
+/// so a column can outlive the `Dataset` it came from.
+#[derive(Clone)]
 pub struct Column {
-    mmap: Mmap,
+    /// `None` for an empty file, which cannot be mapped.
+    map: Option<Arc<Mmap>>,
     dtype: DType,
     len: usize,
 }
 
 impl Column {
-    /// Open a column from a binary file.
-    pub fn open<P: AsRef<Path>>(path: P, dtype: DType) -> Result<Self> {
-        let path = path.as_ref();
-        let file = File::open(path)?;
-        let mmap = unsafe { Mmap::map(&file)? };
-
-        let element_size = dtype.size_bytes();
-        let file_size = mmap.len();
-
-        if file_size % element_size != 0 {
-            return Err(MmappetError::InvalidFileSize {
-                path: path.to_path_buf(),
-                actual: file_size,
-                element_size,
-            });
-        }
-
-        let len = file_size / element_size;
-
-        Ok(Column { mmap, dtype, len })
+    /// Map `file`, which holds `bytes` bytes of `dtype` values.
+    pub(crate) fn map(file: &File, bytes: usize, dtype: DType) -> Result<Self> {
+        let map = match bytes {
+            0 => None,
+            // SAFETY: a mapped file must not be truncated while mapped; datasets are not
+            // written while read.
+            _ => Some(Arc::new(unsafe { Mmap::map(file)? })),
+        };
+        Ok(Column {
+            map,
+            dtype,
+            len: bytes / dtype.size_bytes(),
+        })
     }
 
-    /// Get the data type.
     pub fn dtype(&self) -> DType {
         self.dtype
     }
 
-    /// Get the number of elements.
     pub fn len(&self) -> usize {
         self.len
     }
 
-    /// Check if column is empty.
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }
 
-    /// Get raw bytes.
     pub fn as_bytes(&self) -> &[u8] {
-        &self.mmap[..]
+        match &self.map {
+            Some(map) => &map[..],
+            None => &[],
+        }
     }
 
-    /// Try to get as a typed slice.
-    ///
-    /// Returns `None` if the requested type doesn't match the column's dtype.
+    /// The values as `T`, or `None` if `T` cannot hold this column's dtype.
     pub fn as_slice<T: MmappetType>(&self) -> Option<&[T]> {
         if T::accepts(self.dtype) {
-            Some(cast_slice(&self.mmap[..]))
+            Some(cast(self.as_bytes()))
         } else {
             None
         }
@@ -89,7 +84,7 @@ impl Column {
     #[cfg(feature = "ndarray")]
     /// Get as dynamically-typed array enum.
     pub fn as_typed_array(&self) -> TypedArrayView<'_> {
-        let bytes = &self.mmap[..];
+        let bytes = self.as_bytes();
         match self.dtype {
             DType::UInt8 => TypedArrayView::UInt8(view(bytes)),
             DType::Int8 => TypedArrayView::Int8(view(bytes)),
@@ -111,9 +106,72 @@ impl Column {
     }
 }
 
+impl AsRef<[u8]> for Column {
+    fn as_ref(&self) -> &[u8] {
+        self.as_bytes()
+    }
+}
+
+/// A column checked once to hold `T`; derefs to `&[T]`. Clones share the map, like
+/// [`Column`]'s.
+pub struct Typed<T> {
+    column: Column,
+    element: PhantomData<T>,
+}
+
+impl<T: MmappetType> Typed<T> {
+    /// `column` as `T`, or `None` if `T` cannot hold its dtype.
+    pub fn new(column: Column) -> Option<Self> {
+        if !T::accepts(column.dtype) {
+            return None;
+        }
+        Some(Typed {
+            column,
+            element: PhantomData,
+        })
+    }
+
+    pub fn column(&self) -> &Column {
+        &self.column
+    }
+}
+
+impl<T> Clone for Typed<T> {
+    fn clone(&self) -> Self {
+        Typed {
+            column: self.column.clone(),
+            element: PhantomData,
+        }
+    }
+}
+
+impl<T: MmappetType> Deref for Typed<T> {
+    type Target = [T];
+
+    fn deref(&self) -> &[T] {
+        cast(self.column.as_bytes())
+    }
+}
+
+/// `bytes` as `T` values. A mapped file starts page-aligned and was checked to hold whole
+/// values; an empty column has no map, so its empty slice may be unaligned.
+pub(crate) fn cast<T: bytemuck::Pod>(bytes: &[u8]) -> &[T] {
+    if bytes.is_empty() {
+        return &[];
+    }
+    cast_slice(bytes)
+}
+
+pub(crate) fn cast_mut<T: bytemuck::Pod>(bytes: &mut [u8]) -> &mut [T] {
+    if bytes.is_empty() {
+        return &mut [];
+    }
+    bytemuck::cast_slice_mut(bytes)
+}
+
 #[cfg(feature = "ndarray")]
 fn view<T: bytemuck::Pod>(bytes: &[u8]) -> ArrayView1<'_, T> {
-    ArrayView1::from(cast_slice(bytes))
+    ArrayView1::from(cast(bytes))
 }
 
 /// Enum for dynamically-typed array access.

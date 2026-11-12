@@ -118,3 +118,80 @@ fn reads_the_new_types_python_writes() {
         "{error}"
     );
 }
+
+#[test]
+fn reads_names_with_spaces() {
+    let dir = scratch("spaced_names");
+    oracle(&["spaced-names", dir.to_str().unwrap()]);
+    let ds = mmappet::Dataset::open(&dir).unwrap();
+    assert_eq!(ds.get::<f64>("retention time").unwrap(), &[1.5, 2.5]);
+    assert_eq!(ds.get::<i8>("charge state").unwrap(), &[2, 3]);
+}
+
+#[test]
+fn reads_a_dataset_without_rows() {
+    let dir = scratch("no_rows");
+    oracle(&["no-rows", dir.to_str().unwrap()]);
+    let ds = mmappet::Dataset::open(&dir).unwrap();
+    assert_eq!(ds.len(), 0);
+    assert_eq!(ds.get::<u32>("id").unwrap(), &[] as &[u32]);
+    let score = ds.typed::<f64>("score").unwrap();
+    assert!(score.is_empty());
+    let mut ds = mmappet::DatasetMut::open(&dir).unwrap();
+    assert!(ds.get_mut::<u32>("id").unwrap().is_empty());
+}
+
+#[test]
+fn typed_columns_outlive_their_dataset() {
+    let dir = scratch("outlive");
+    oracle(&["smoke", dir.to_str().unwrap()]);
+    let (ids, score_bytes) = {
+        let ds = mmappet::Dataset::open(&dir).unwrap();
+        (
+            ds.typed::<u32>("id").unwrap(),
+            ds.column("score").unwrap().clone(),
+        )
+    };
+    assert_eq!(&*ids, &[1, 2, 3]);
+    assert_eq!(
+        score_bytes.as_ref(),
+        bytemuck::cast_slice::<f64, u8>(&[0.5, 1.5, 2.5])
+    );
+}
+
+#[test]
+fn optional_columns() {
+    let dir = scratch("optional");
+    oracle(&["smoke", dir.to_str().unwrap()]);
+    let ds = mmappet::Dataset::open(&dir).unwrap();
+    assert_eq!(ds.get_opt::<u32>("id").unwrap(), Some(&[1, 2, 3][..]));
+    assert_eq!(ds.get_opt::<u32>("absent").unwrap(), None);
+    assert!(ds.get_opt::<f32>("id").is_err());
+}
+
+#[test]
+fn python_reads_what_rust_fills_in_place() {
+    use mmappet::Datetime64;
+    let dir = scratch("filled");
+    let nrows = 1000;
+    oracle(&["preallocate", dir.to_str().unwrap(), &nrows.to_string()]);
+    let mut ds = mmappet::DatasetMut::open(&dir).unwrap();
+    assert_eq!(ds.len(), nrows);
+    for (i, id) in ds.get_mut::<u32>("id").unwrap().iter_mut().enumerate() {
+        *id = 3 * i as u32;
+    }
+    for (i, score) in ds.get_mut::<f64>("score").unwrap().iter_mut().enumerate() {
+        *score = i as f64 / 2.0;
+    }
+    for (i, when) in ds
+        .get_mut::<Datetime64>("when")
+        .unwrap()
+        .iter_mut()
+        .enumerate()
+    {
+        *when = Datetime64(1000 * i as i64);
+    }
+    ds.flush().unwrap();
+    drop(ds);
+    oracle(&["check-filled", dir.to_str().unwrap()]);
+}

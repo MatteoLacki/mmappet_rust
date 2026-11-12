@@ -207,9 +207,7 @@ fn cmd_plot(path: &PathBuf, n: usize, column: Option<String>, width: usize) -> R
             .to_string(),
     };
 
-    let col = ds
-        .column(&col_name)
-        .ok_or_else(|| anyhow::anyhow!("Column not found: {}", col_name))?;
+    let col = ds.column(&col_name)?;
 
     let n = n.min(ds.len());
 

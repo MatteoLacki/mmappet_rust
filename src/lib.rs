@@ -28,10 +28,10 @@ mod dtype;
 mod error;
 mod schema;
 
-pub use column::Column;
 #[cfg(feature = "ndarray")]
 pub use column::TypedArrayView;
-pub use dataset::Dataset;
+pub use column::{Column, Typed};
+pub use dataset::{Dataset, DatasetMut};
 pub use dtype::{DType, Datetime64, MmappetType, TimeUnit, Timedelta64};
 pub use error::{MmappetError, Result};
 pub use half::f16;
