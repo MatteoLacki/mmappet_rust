@@ -68,7 +68,12 @@ fn main() -> Result<()> {
         Commands::Info { path } => cmd_info(&path),
         Commands::Head { path, n, columns } => cmd_head(&path, n, columns),
         Commands::Stats { path } => cmd_stats(&path),
-        Commands::Plot { path, n, column, width } => cmd_plot(&path, n, column, width),
+        Commands::Plot {
+            path,
+            n,
+            column,
+            width,
+        } => cmd_plot(&path, n, column, width),
     }
 }
 
@@ -81,7 +86,10 @@ fn cmd_info(path: &PathBuf) -> Result<()> {
     println!();
     println!("Schema:");
     for col_def in ds.schema().columns() {
-        println!("  {:>2}. {} ({})", col_def.index, col_def.name, col_def.dtype);
+        println!(
+            "  {:>2}. {} ({})",
+            col_def.index, col_def.name, col_def.dtype
+        );
     }
 
     Ok(())
@@ -186,12 +194,16 @@ fn cmd_plot(path: &PathBuf, n: usize, column: Option<String>, width: usize) -> R
     // Find column to plot
     let col_name = match column {
         Some(name) => name,
-        None => ds.schema().column_names().first()
+        None => ds
+            .schema()
+            .column_names()
+            .first()
             .ok_or_else(|| anyhow::anyhow!("Dataset has no columns"))?
             .to_string(),
     };
 
-    let col = ds.column(&col_name)
+    let col = ds
+        .column(&col_name)
         .ok_or_else(|| anyhow::anyhow!("Column not found: {}", col_name))?;
 
     let n = n.min(ds.len());
@@ -240,10 +252,14 @@ fn cmd_plot(path: &PathBuf, n: usize, column: Option<String>, width: usize) -> R
 
         let bar: String = "█".repeat(bar_len);
 
-        println!("{:>idx_w$} │ {:>val_w$.4} │{}",
-            i, val, bar,
+        println!(
+            "{:>idx_w$} │ {:>val_w$.4} │{}",
+            i,
+            val,
+            bar,
             idx_w = max_idx_width,
-            val_w = val_width);
+            val_w = val_width
+        );
     }
 
     Ok(())

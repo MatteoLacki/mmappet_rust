@@ -85,10 +85,12 @@ impl Dataset {
             .get(name)
             .ok_or_else(|| MmappetError::ColumnNotFound(name.to_string()))?;
 
-        column.as_slice::<T>().ok_or_else(|| MmappetError::TypeMismatch {
-            expected: T::DTYPE,
-            actual: column.dtype(),
-        })
+        column
+            .as_slice::<T>()
+            .ok_or_else(|| MmappetError::TypeMismatch {
+                expected: T::DTYPE,
+                actual: column.dtype(),
+            })
     }
 
     #[cfg(feature = "ndarray")]

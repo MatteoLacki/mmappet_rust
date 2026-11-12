@@ -36,7 +36,9 @@ pub enum MmappetError {
     #[error("Missing column file: {0}")]
     MissingColumnFile(PathBuf),
 
-    #[error("Invalid column file size: {path} has {actual} bytes, expected multiple of {element_size}")]
+    #[error(
+        "Invalid column file size: {path} has {actual} bytes, expected multiple of {element_size}"
+    )]
     InvalidFileSize {
         path: PathBuf,
         actual: usize,

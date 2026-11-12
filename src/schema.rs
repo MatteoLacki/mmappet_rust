@@ -120,7 +120,10 @@ mod tests {
         let schema = Schema::parse(content).unwrap();
 
         assert_eq!(schema.len(), 4);
-        assert_eq!(schema.column_names(), vec!["tof", "intensity", "score", "mz"]);
+        assert_eq!(
+            schema.column_names(),
+            vec!["tof", "intensity", "score", "mz"]
+        );
 
         let tof = schema.get("tof").unwrap();
         assert_eq!(tof.index, 0);
