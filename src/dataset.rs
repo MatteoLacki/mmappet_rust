@@ -88,7 +88,8 @@ impl Dataset {
         column
             .as_slice::<T>()
             .ok_or_else(|| MmappetError::TypeMismatch {
-                expected: T::DTYPE,
+                column: name.to_string(),
+                expected: std::any::type_name::<T>(),
                 actual: column.dtype(),
             })
     }
@@ -97,7 +98,7 @@ impl Dataset {
     /// Get a typed ArrayView1 directly by name.
     ///
     /// Returns an error if the column doesn't exist or the type doesn't match.
-    pub fn get_array<T: MmappetType>(&self, name: &str) -> Result<ArrayView1<T>> {
+    pub fn get_array<T: MmappetType>(&self, name: &str) -> Result<ArrayView1<'_, T>> {
         let column = self
             .columns
             .get(name)
@@ -106,7 +107,8 @@ impl Dataset {
         column
             .as_array::<T>()
             .ok_or_else(|| MmappetError::TypeMismatch {
-                expected: T::DTYPE,
+                column: name.to_string(),
+                expected: std::any::type_name::<T>(),
                 actual: column.dtype(),
             })
     }

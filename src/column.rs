@@ -3,10 +3,16 @@
 use std::fs::File;
 use std::path::Path;
 
+#[cfg(feature = "ndarray")]
+use crate::dtype::{Datetime64, TimeUnit, Timedelta64};
 use bytemuck::cast_slice;
+#[cfg(feature = "ndarray")]
+use half::f16;
 use memmap2::Mmap;
 #[cfg(feature = "ndarray")]
 use ndarray::ArrayView1;
+#[cfg(feature = "ndarray")]
+use num_complex::Complex;
 
 use crate::dtype::{DType, MmappetType};
 use crate::error::{MmappetError, Result};
@@ -65,7 +71,7 @@ impl Column {
     ///
     /// Returns `None` if the requested type doesn't match the column's dtype.
     pub fn as_slice<T: MmappetType>(&self) -> Option<&[T]> {
-        if T::DTYPE == self.dtype {
+        if T::accepts(self.dtype) {
             Some(cast_slice(&self.mmap[..]))
         } else {
             None
@@ -76,27 +82,38 @@ impl Column {
     /// Try to get as ndarray ArrayView1.
     ///
     /// Returns `None` if the requested type doesn't match the column's dtype.
-    pub fn as_array<T: MmappetType>(&self) -> Option<ArrayView1<T>> {
+    pub fn as_array<T: MmappetType>(&self) -> Option<ArrayView1<'_, T>> {
         self.as_slice::<T>().map(ArrayView1::from)
     }
 
     #[cfg(feature = "ndarray")]
     /// Get as dynamically-typed array enum.
     pub fn as_typed_array(&self) -> TypedArrayView<'_> {
+        let bytes = &self.mmap[..];
         match self.dtype {
-            DType::UInt8 => TypedArrayView::UInt8(ArrayView1::from(cast_slice(&self.mmap[..]))),
-            DType::Int8 => TypedArrayView::Int8(ArrayView1::from(cast_slice(&self.mmap[..]))),
-            DType::UInt16 => TypedArrayView::UInt16(ArrayView1::from(cast_slice(&self.mmap[..]))),
-            DType::Int16 => TypedArrayView::Int16(ArrayView1::from(cast_slice(&self.mmap[..]))),
-            DType::UInt32 => TypedArrayView::UInt32(ArrayView1::from(cast_slice(&self.mmap[..]))),
-            DType::Int32 => TypedArrayView::Int32(ArrayView1::from(cast_slice(&self.mmap[..]))),
-            DType::UInt64 => TypedArrayView::UInt64(ArrayView1::from(cast_slice(&self.mmap[..]))),
-            DType::Int64 => TypedArrayView::Int64(ArrayView1::from(cast_slice(&self.mmap[..]))),
-            DType::Float32 => TypedArrayView::Float32(ArrayView1::from(cast_slice(&self.mmap[..]))),
-            DType::Float64 => TypedArrayView::Float64(ArrayView1::from(cast_slice(&self.mmap[..]))),
-            DType::Bool => TypedArrayView::Bool(ArrayView1::from(cast_slice(&self.mmap[..]))),
+            DType::UInt8 => TypedArrayView::UInt8(view(bytes)),
+            DType::Int8 => TypedArrayView::Int8(view(bytes)),
+            DType::UInt16 => TypedArrayView::UInt16(view(bytes)),
+            DType::Int16 => TypedArrayView::Int16(view(bytes)),
+            DType::UInt32 => TypedArrayView::UInt32(view(bytes)),
+            DType::Int32 => TypedArrayView::Int32(view(bytes)),
+            DType::UInt64 => TypedArrayView::UInt64(view(bytes)),
+            DType::Int64 => TypedArrayView::Int64(view(bytes)),
+            DType::Float16 => TypedArrayView::Float16(view(bytes)),
+            DType::Float32 => TypedArrayView::Float32(view(bytes)),
+            DType::Float64 => TypedArrayView::Float64(view(bytes)),
+            DType::Complex64 => TypedArrayView::Complex64(view(bytes)),
+            DType::Complex128 => TypedArrayView::Complex128(view(bytes)),
+            DType::Bool => TypedArrayView::Bool(view(bytes)),
+            DType::Datetime64(unit) => TypedArrayView::Datetime64(unit, view(bytes)),
+            DType::Timedelta64(unit) => TypedArrayView::Timedelta64(unit, view(bytes)),
         }
     }
+}
+
+#[cfg(feature = "ndarray")]
+fn view<T: bytemuck::Pod>(bytes: &[u8]) -> ArrayView1<'_, T> {
+    ArrayView1::from(cast_slice(bytes))
 }
 
 /// Enum for dynamically-typed array access.
@@ -110,9 +127,14 @@ pub enum TypedArrayView<'a> {
     Int32(ArrayView1<'a, i32>),
     UInt64(ArrayView1<'a, u64>),
     Int64(ArrayView1<'a, i64>),
+    Float16(ArrayView1<'a, f16>),
     Float32(ArrayView1<'a, f32>),
     Float64(ArrayView1<'a, f64>),
-    Bool(ArrayView1<'a, u8>), // Bool stored as u8
+    Complex64(ArrayView1<'a, Complex<f32>>),
+    Complex128(ArrayView1<'a, Complex<f64>>),
+    Bool(ArrayView1<'a, u8>),
+    Datetime64(TimeUnit, ArrayView1<'a, Datetime64>),
+    Timedelta64(TimeUnit, ArrayView1<'a, Timedelta64>),
 }
 
 #[cfg(feature = "ndarray")]
@@ -128,9 +150,14 @@ impl<'a> TypedArrayView<'a> {
             TypedArrayView::Int32(arr) => arr.len(),
             TypedArrayView::UInt64(arr) => arr.len(),
             TypedArrayView::Int64(arr) => arr.len(),
+            TypedArrayView::Float16(arr) => arr.len(),
             TypedArrayView::Float32(arr) => arr.len(),
             TypedArrayView::Float64(arr) => arr.len(),
+            TypedArrayView::Complex64(arr) => arr.len(),
+            TypedArrayView::Complex128(arr) => arr.len(),
             TypedArrayView::Bool(arr) => arr.len(),
+            TypedArrayView::Datetime64(_, arr) => arr.len(),
+            TypedArrayView::Timedelta64(_, arr) => arr.len(),
         }
     }
 
@@ -150,9 +177,14 @@ impl<'a> TypedArrayView<'a> {
             TypedArrayView::Int32(_) => DType::Int32,
             TypedArrayView::UInt64(_) => DType::UInt64,
             TypedArrayView::Int64(_) => DType::Int64,
+            TypedArrayView::Float16(_) => DType::Float16,
             TypedArrayView::Float32(_) => DType::Float32,
             TypedArrayView::Float64(_) => DType::Float64,
+            TypedArrayView::Complex64(_) => DType::Complex64,
+            TypedArrayView::Complex128(_) => DType::Complex128,
             TypedArrayView::Bool(_) => DType::Bool,
+            TypedArrayView::Datetime64(unit, _) => DType::Datetime64(*unit),
+            TypedArrayView::Timedelta64(unit, _) => DType::Timedelta64(*unit),
         }
     }
 }

@@ -132,7 +132,12 @@ fn cmd_head(path: &PathBuf, n: usize, columns: Option<String>) -> Result<()> {
                 TypedArrayView::Int64(arr) => print!("{}", arr[row_idx]),
                 TypedArrayView::Float32(arr) => print!("{:.6}", arr[row_idx]),
                 TypedArrayView::Float64(arr) => print!("{:.6}", arr[row_idx]),
+                TypedArrayView::Float16(arr) => print!("{:.6}", arr[row_idx].to_f64()),
+                TypedArrayView::Complex64(arr) => print!("{}", arr[row_idx]),
+                TypedArrayView::Complex128(arr) => print!("{}", arr[row_idx]),
                 TypedArrayView::Bool(arr) => print!("{}", arr[row_idx] != 0),
+                TypedArrayView::Datetime64(unit, arr) => print!("{} [{unit}]", arr[row_idx].0),
+                TypedArrayView::Timedelta64(unit, arr) => print!("{} [{unit}]", arr[row_idx].0),
             }
         }
         println!();
@@ -220,7 +225,13 @@ fn cmd_plot(path: &PathBuf, n: usize, column: Option<String>, width: usize) -> R
         TypedArrayView::Int64(arr) => arr.iter().take(n).map(|&x| x as f64).collect(),
         TypedArrayView::Float32(arr) => arr.iter().take(n).map(|&x| x as f64).collect(),
         TypedArrayView::Float64(arr) => arr.iter().take(n).copied().collect(),
+        TypedArrayView::Float16(arr) => arr.iter().take(n).map(|x| x.to_f64()).collect(),
         TypedArrayView::Bool(arr) => arr.iter().take(n).map(|&x| x as f64).collect(),
+        TypedArrayView::Datetime64(_, arr) => arr.iter().take(n).map(|x| x.0 as f64).collect(),
+        TypedArrayView::Timedelta64(_, arr) => arr.iter().take(n).map(|x| x.0 as f64).collect(),
+        TypedArrayView::Complex64(_) | TypedArrayView::Complex128(_) => {
+            anyhow::bail!("cannot plot complex column {col_name}")
+        }
     };
 
     if values.is_empty() {

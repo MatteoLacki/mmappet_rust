@@ -22,6 +22,10 @@ deliberately; the checks compare bytes, so a new Python version can change what 
 Deliberate refusals:
 
 - Columns of unequal length are an error on read (Python's dict reader does not check).
+- Time columns hold only `s`, `ms`, `us` or `ns` (`TimeUnit`). Python builds its schema
+  through pandas, which reads any other numpy unit under a wrong label (`datetime64[D]`
+  ticks come back as seconds) and refuses multiples such as `10ms`; Rust refuses them all.
+  Python's `DatasetWriter.append` cannot write time columns at all; `append_df` can.
 
 ## Features
 

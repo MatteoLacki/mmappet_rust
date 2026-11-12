@@ -32,8 +32,10 @@ pub use column::Column;
 #[cfg(feature = "ndarray")]
 pub use column::TypedArrayView;
 pub use dataset::Dataset;
-pub use dtype::{DType, MmappetType};
+pub use dtype::{DType, Datetime64, MmappetType, TimeUnit, Timedelta64};
 pub use error::{MmappetError, Result};
+pub use half::f16;
+pub use num_complex::Complex;
 pub use schema::{ColumnDef, Schema};
 
 #[cfg(feature = "ndarray")]

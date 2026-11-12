@@ -20,8 +20,12 @@ pub enum MmappetError {
     #[error("Column not found: {0}")]
     ColumnNotFound(String),
 
-    #[error("Type mismatch: expected {expected:?}, got {actual:?}")]
-    TypeMismatch { expected: DType, actual: DType },
+    #[error("Column '{column}' is {actual}, not readable as {expected}")]
+    TypeMismatch {
+        column: String,
+        expected: &'static str,
+        actual: DType,
+    },
 
     #[error("Column length mismatch: column '{name}' has {actual} elements, expected {expected}")]
     LengthMismatch {
