@@ -10,6 +10,7 @@ use num_complex::Complex;
 
 use crate::dtype::{DType, Datetime64, TimeUnit, Timedelta64};
 use crate::error::{MmappetError, Result};
+use crate::lock::{self, Held, Lock, LOCK_FILE};
 use crate::schema::Schema;
 
 /// Python's `open(..., buffering=10240)`.
@@ -202,28 +203,47 @@ pub struct DatasetWriter {
     columns: Vec<(String, DType)>,
     files: Vec<BufWriter<File>>,
     len: usize,
+    /// Dropped after `files`, so their last flush happens under the lock.
+    _lock: Held,
 }
 
 impl DatasetWriter {
-    /// Opens `path` as `mode` says. With `schema`, the columns are fixed and `schema.txt`
-    /// written now; without it, the first `append` fixes them (or, under `AppendOk`, the
-    /// dataset already there does).
+    /// Opens `path` as `mode` says, locking its directory ([`Lock::Directory`]). With
+    /// `schema`, the columns are fixed and `schema.txt` written now; without it, the first
+    /// `append` fixes them (or, under `AppendOk`, the dataset already there does).
     pub fn new<P: AsRef<Path>>(
         path: P,
         mode: Mode,
         schema: Option<&[(&str, DType)]>,
     ) -> Result<Self> {
+        Self::new_locked(path, mode, schema, Lock::default())
+    }
+
+    /// [`new`](Self::new) with another [`Lock`]. A dataset another writer has locked is an
+    /// error at once; the lock is held until the writer is dropped.
+    pub fn new_locked<P: AsRef<Path>>(
+        path: P,
+        mode: Mode,
+        schema: Option<&[(&str, DType)]>,
+        lock: Lock,
+    ) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
+        let exists = path.exists();
+        if mode == Mode::New && exists {
+            return Err(MmappetError::AlreadyExists(path));
+        }
+        std::fs::create_dir_all(&path)?;
+        let held = lock::acquire(&path, lock)?;
         let mut writer = DatasetWriter {
             path,
             columns: Vec::new(),
             files: Vec::new(),
             len: 0,
+            _lock: held,
         };
-        let exists = writer.path.exists();
         match mode {
-            Mode::New if exists => return Err(MmappetError::AlreadyExists(writer.path)),
-            Mode::OverwriteDir if exists => std::fs::remove_dir_all(&writer.path)?,
+            // Emptied, not removed: a new directory would not be the one locked.
+            Mode::OverwriteDir if exists => empty_directory(&writer.path)?,
             Mode::AppendOk if exists => {
                 writer.reopen()?;
                 if let Some(schema) = schema {
@@ -233,7 +253,6 @@ impl DatasetWriter {
             }
             _ => {}
         }
-        std::fs::create_dir_all(&writer.path)?;
         if let Some(schema) = schema {
             writer.fix_schema(schema)?;
         }
@@ -248,12 +267,22 @@ impl DatasetWriter {
         nrows: usize,
         overwrite_dir: bool,
     ) -> Result<()> {
+        Self::preallocate_locked(path, schema, nrows, overwrite_dir, Lock::default())
+    }
+
+    pub fn preallocate_locked<P: AsRef<Path>>(
+        path: P,
+        schema: &[(&str, DType)],
+        nrows: usize,
+        overwrite_dir: bool,
+        lock: Lock,
+    ) -> Result<()> {
         let mode = if overwrite_dir {
             Mode::OverwriteDir
         } else {
             Mode::New
         };
-        let mut writer = DatasetWriter::new(path, mode, Some(schema))?;
+        let mut writer = DatasetWriter::new_locked(path, mode, Some(schema), lock)?;
         for (file, (_, dtype)) in writer.files.iter_mut().zip(&writer.columns) {
             file.flush()?;
             file.get_ref()
@@ -465,6 +494,67 @@ impl DatasetWriter {
         std::fs::write(self.path.join("schema.txt"), lines.join("\n"))?;
         Ok(())
     }
+}
+
+/// Cuts the dataset at `path` to its first `nrows` rows, in place: each column file is
+/// shrunk, nothing is copied. Python's `crop_dataset` writes the same into a new directory.
+/// Locks the directory ([`Lock::Directory`]) while it runs.
+///
+/// A reader that has the dataset mapped, in this process or another, crashes (SIGBUS) on
+/// touching a cut row: truncate only what nothing is reading.
+pub fn truncate<P: AsRef<Path>>(path: P, nrows: usize) -> Result<()> {
+    truncate_locked(path, nrows, Lock::default())
+}
+
+pub fn truncate_locked<P: AsRef<Path>>(path: P, nrows: usize, lock: Lock) -> Result<()> {
+    let path = path.as_ref();
+    let _held = lock::acquire(path, lock)?;
+    let schema = Schema::from_path(path)?;
+    let mut files = Vec::with_capacity(schema.len());
+    let mut rows = None;
+    for def in schema.columns() {
+        let file = OpenOptions::new()
+            .write(true)
+            .open(path.join(format!("{}.bin", def.index)))?;
+        let bytes = file.metadata()?.len() as usize;
+        let size = def.dtype.size_bytes();
+        if bytes % size != 0 || rows.is_some_and(|rows| rows != bytes / size) {
+            return Err(MmappetError::Append(format!(
+                "corrupted dataset: columns of unequal lengths in {}",
+                path.display()
+            )));
+        }
+        rows = Some(bytes / size);
+        files.push((file, size));
+    }
+    let rows = rows.unwrap_or(0);
+    if nrows > rows {
+        return Err(MmappetError::TruncateBeyondEnd {
+            path: path.to_path_buf(),
+            requested: nrows,
+            rows,
+        });
+    }
+    for (file, size) in files {
+        file.set_len((nrows * size) as u64)?;
+    }
+    Ok(())
+}
+
+/// Removes everything in `dir` but its lock file.
+fn empty_directory(dir: &Path) -> Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        if entry.file_name() == LOCK_FILE {
+            continue;
+        }
+        if entry.file_type()?.is_dir() {
+            std::fs::remove_dir_all(entry.path())?;
+        } else {
+            std::fs::remove_file(entry.path())?;
+        }
+    }
+    Ok(())
 }
 
 fn check_whole_values(name: &str, values: &Values) -> Result<()> {

@@ -1,11 +1,15 @@
 """Python mmappet as the oracle for the Rust crate's tests (`tests/oracle.rs`)."""
 
 import argparse
+import fcntl
+import os
+import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 from mmappet import DatasetWriter, open_dataset_dct
+from mmappet.dirty_hacks_experimental_never_use import crop_dataset
 
 # Every dtype the crate supports. Time columns hold only the units pandas keeps.
 DTYPES = [
@@ -132,6 +136,18 @@ def check_extra(path: Path, nrows: int) -> None:
     assert np.array_equal(columns["extra"], 3 * np.arange(nrows)), columns["extra"]
 
 
+def hold_lock(path: Path, kind: str) -> None:
+    """flock the dataset directory (`directory`) or its `write.lock` (`file`), print
+    `locked`, and hold the lock until stdin closes or the process is killed."""
+    if kind == "directory":
+        fd = os.open(path, os.O_RDONLY)
+    else:
+        fd = os.open(path / "write.lock", os.O_WRONLY | os.O_CREAT)
+    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    print("locked", flush=True)
+    sys.stdin.read()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -150,6 +166,13 @@ def main() -> None:
     check_extra_parser = commands.add_parser("check-extra")
     check_extra_parser.add_argument("path", type=Path)
     check_extra_parser.add_argument("nrows", type=int)
+    crop_parser = commands.add_parser("crop")
+    crop_parser.add_argument("source", type=Path)
+    crop_parser.add_argument("target", type=Path)
+    crop_parser.add_argument("nrows", type=int)
+    hold_lock_parser = commands.add_parser("hold-lock")
+    hold_lock_parser.add_argument("path", type=Path)
+    hold_lock_parser.add_argument("kind", choices=["directory", "file"])
     preallocate_parser = commands.add_parser("preallocate")
     preallocate_parser.add_argument("path", type=Path)
     preallocate_parser.add_argument("nrows", type=int)
@@ -172,6 +195,10 @@ def main() -> None:
         reference(args.path, args.start, args.stop)
     elif args.command == "check-extra":
         check_extra(args.path, args.nrows)
+    elif args.command == "crop":
+        crop_dataset(args.source, args.target, args.nrows)
+    elif args.command == "hold-lock":
+        hold_lock(args.path, args.kind)
 
 
 if __name__ == "__main__":

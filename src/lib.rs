@@ -26,6 +26,7 @@ mod column;
 mod dataset;
 mod dtype;
 mod error;
+mod lock;
 mod schema;
 mod writer;
 
@@ -36,9 +37,10 @@ pub use dataset::{Dataset, DatasetMut};
 pub use dtype::{DType, Datetime64, MmappetType, TimeUnit, Timedelta64};
 pub use error::{MmappetError, Result};
 pub use half::f16;
+pub use lock::{Lock, LOCK_FILE};
 pub use num_complex::Complex;
 pub use schema::{ColumnDef, Schema};
-pub use writer::{DatasetWriter, Mode, Value, Values};
+pub use writer::{truncate, truncate_locked, DatasetWriter, Mode, Value, Values};
 
 #[cfg(feature = "ndarray")]
 pub use ndarray::ArrayView1;

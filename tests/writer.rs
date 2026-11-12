@@ -94,3 +94,46 @@ fn schemas_refuse_names_schema_txt_cannot_hold() {
     }
     assert!(DatasetWriter::new(scratch("empty"), Mode::New, Some(&[])).is_err());
 }
+
+#[test]
+fn a_second_writer_is_refused_until_the_first_is_dropped() {
+    use mmappet::{Lock, MmappetError};
+    for lock in [Lock::Directory, Lock::File] {
+        let dir = scratch("second_writer");
+        two_rows(&dir);
+        let first = DatasetWriter::new_locked(&dir, Mode::AppendOk, None, lock).unwrap();
+        let second = DatasetWriter::new_locked(&dir, Mode::AppendOk, None, lock);
+        assert!(matches!(second, Err(MmappetError::Locked(_))), "{lock:?}");
+        assert!(matches!(
+            mmappet::truncate_locked(&dir, 1, lock),
+            Err(MmappetError::Locked(_))
+        ));
+        assert!(DatasetWriter::new_locked(&dir, Mode::AppendOk, None, Lock::None).is_ok());
+        drop(first);
+        assert!(DatasetWriter::new_locked(&dir, Mode::AppendOk, None, lock).is_ok());
+    }
+}
+
+#[test]
+fn locks_leave_a_file_only_when_asked_and_overwrite_keeps_it() {
+    use mmappet::{Lock, LOCK_FILE};
+    let dir = scratch("lock_file");
+    two_rows(&dir);
+    assert!(
+        !dir.join(LOCK_FILE).exists(),
+        "Lock::Directory leaves no file"
+    );
+    let schema = [("id", DType::UInt32)];
+    let writer =
+        DatasetWriter::new_locked(&dir, Mode::OverwriteDir, Some(&schema), Lock::File).unwrap();
+    assert!(dir.join(LOCK_FILE).exists());
+    drop(writer);
+    let writer =
+        DatasetWriter::new_locked(&dir, Mode::OverwriteDir, Some(&schema), Lock::File).unwrap();
+    assert!(
+        dir.join(LOCK_FILE).exists(),
+        "OverwriteDir keeps the lock file"
+    );
+    assert!(!dir.join("1.bin").exists());
+    drop(writer);
+}

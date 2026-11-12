@@ -400,3 +400,74 @@ fn rust_preallocates_what_python_preallocates() {
     drop(ds);
     oracle(&["check-filled", rust.to_str().unwrap()]);
 }
+
+// ---- Truncate and locks ----
+
+#[test]
+fn truncate_matches_python_crop_dataset() {
+    let dtypes = oracle_dtypes();
+    let python = scratch("crop_python");
+    let whole = python_reference("crop_source", &[(0, 5)]);
+    oracle(&[
+        "crop",
+        whole.to_str().unwrap(),
+        python.to_str().unwrap(),
+        "3",
+    ]);
+
+    let rust = scratch("truncate_rust");
+    let mut writer = DatasetWriter::new(&rust, Mode::New, None).unwrap();
+    append_reference(&mut writer, &dtypes, 0..5);
+    writer.close().unwrap();
+    assert!(mmappet::truncate(&rust, 6).is_err());
+    mmappet::truncate(&rust, 3).unwrap();
+    assert_same_tree(&rust, &python);
+    mmappet::truncate(&rust, 0).unwrap();
+    assert_eq!(mmappet::Dataset::open(&rust).unwrap().len(), 0);
+}
+
+/// A Python process holding `kind`'s flock on `dir` until killed.
+struct PythonLock(std::process::Child);
+
+impl PythonLock {
+    fn hold(dir: &Path, kind: &str) -> Self {
+        use std::io::BufRead;
+        let mut child = Command::new(python())
+            .arg(crate_root().join("tests/python/oracle.py"))
+            .args(["hold-lock", dir.to_str().unwrap(), kind])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut line = String::new();
+        let stdout = child.stdout.take().unwrap();
+        std::io::BufReader::new(stdout)
+            .read_line(&mut line)
+            .unwrap();
+        assert_eq!(line.trim(), "locked");
+        PythonLock(child)
+    }
+
+    /// Kills the holder, as a crash would, and waits for it.
+    fn kill(mut self) {
+        self.0.kill().unwrap();
+        self.0.wait().unwrap();
+    }
+}
+
+#[test]
+fn a_python_flock_stops_rust_writers_until_its_holder_dies() {
+    use mmappet::{Lock, MmappetError};
+    for (kind, lock) in [("directory", Lock::Directory), ("file", Lock::File)] {
+        let dir = scratch(&format!("python_lock_{kind}"));
+        oracle(&["smoke", dir.to_str().unwrap()]);
+        let holder = PythonLock::hold(&dir, kind);
+        let writer = DatasetWriter::new_locked(&dir, Mode::AppendOk, None, lock);
+        assert!(matches!(writer, Err(MmappetError::Locked(_))), "{kind}");
+        let cut = mmappet::truncate_locked(&dir, 1, lock);
+        assert!(matches!(cut, Err(MmappetError::Locked(_))), "{kind}");
+        holder.kill();
+        let writer = DatasetWriter::new_locked(&dir, Mode::AppendOk, None, lock).unwrap();
+        assert_eq!(writer.len(), 3);
+    }
+}

@@ -35,6 +35,19 @@ Python's `append_column` fails ("Corrupted dataset") on a writer that has append
 its 0-row pandas schema retypes the existing columns. The oracle checks Rust's
 `append_column` through Python's reader instead.
 
+## Locks and truncate
+
+Writers (`DatasetWriter`, `preallocate`, `truncate`) take an advisory `flock` and fail at
+once if another holder has it; readers take none. `Lock::Directory` (default) locks the
+directory itself, `Lock::File` its `write.lock` (mmappeteer's name, for sharing with Python
+code that flocks it), `Lock::None` nothing, as Python mmappet's writer. The kernel drops a
+lock when its holder dies, so a leftover `write.lock` is harmless; deleting one while held
+lets a second writer in. For the same reason `OverwriteDir` empties the locked directory
+rather than replacing it.
+
+`truncate` shrinks the column files in place. A reader mapping them, in any process, gets
+SIGBUS on a cut row, and no lock prevents that.
+
 ## Features
 
 The library has no default features. `cli` (the `mmappet-cli` binary) pulls in `clap`,

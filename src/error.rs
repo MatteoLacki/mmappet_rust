@@ -70,6 +70,16 @@ pub enum MmappetError {
 
     #[error("Cannot append: {0}")]
     Append(String),
+
+    #[error("{0} is locked by another writer")]
+    Locked(PathBuf),
+
+    #[error("Cannot truncate {path} to {requested} rows: it has {rows}")]
+    TruncateBeyondEnd {
+        path: PathBuf,
+        requested: usize,
+        rows: usize,
+    },
 }
 
 /// Result type for mmappet operations.

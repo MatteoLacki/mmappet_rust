@@ -95,6 +95,20 @@ writer.close()?;
 DatasetWriter::preallocate("filled.mmappet", &[("score", DType::Float32)], 1000, false)?;
 ```
 
+Writers lock the dataset directory (`flock`, advisory) and fail at once if another writer
+holds it; `Lock::File` locks `<dir>/write.lock` instead, `Lock::None` nothing. A crashed
+writer's lock is released by the kernel.
+
+```rust
+use mmappet::{Lock, MmappetError};
+let writer = DatasetWriter::new_locked("scores.mmappet", Mode::AppendOk, None, Lock::File);
+if let Err(MmappetError::Locked(path)) = writer { /* another writer has it */ }
+
+// Cut a dataset to its first rows, in place (e.g. after preallocating too many).
+// Nothing may be reading it: a reader touching a cut row crashes.
+mmappet::truncate("filled.mmappet", 731)?;
+```
+
 With the `ndarray` feature, `ds.get_array::<T>(name)` gives an `ArrayView1<T>` and
 `column.as_typed_array()` a `TypedArrayView` matched on the dtype.
 
