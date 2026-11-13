@@ -414,6 +414,17 @@ impl DatasetWriter {
         self.flush()
     }
 
+    /// Flushes every column and has the disk hold it (`fsync`), with `schema.txt`, before
+    /// returning: what a dataset needs before it is renamed into place.
+    pub fn sync(&mut self) -> Result<()> {
+        self.flush()?;
+        for file in &self.files {
+            file.get_ref().sync_all()?;
+        }
+        File::open(self.path.join("schema.txt"))?.sync_all()?;
+        Ok(())
+    }
+
     fn fix_schema(&mut self, schema: &[(&str, DType)]) -> Result<()> {
         if schema.is_empty() {
             return Err(MmappetError::EmptySchema);

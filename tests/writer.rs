@@ -137,3 +137,13 @@ fn locks_leave_a_file_only_when_asked_and_overwrite_keeps_it() {
     assert!(!dir.join("1.bin").exists());
     drop(writer);
 }
+
+#[test]
+fn sync_leaves_every_appended_row_in_the_files() {
+    let dir = scratch("sync");
+    let mut writer = DatasetWriter::new(&dir, Mode::New, None).unwrap();
+    let ids: Vec<u32> = vec![1, 2];
+    writer.append(&[("id", (&ids).into())]).unwrap();
+    writer.sync().unwrap();
+    assert_eq!(std::fs::read(dir.join("0.bin")).unwrap().len(), 8);
+}
