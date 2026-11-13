@@ -11,7 +11,7 @@ use num_complex::Complex;
 use crate::dtype::{DType, Datetime64, TimeUnit, Timedelta64};
 use crate::error::{MmappetError, Result};
 use crate::lock::{self, Held, Lock, LOCK_FILE};
-use crate::schema::Schema;
+use crate::schema::{column_file, Schema};
 
 /// Python's `open(..., buffering=10240)`.
 const BUFFER_BYTES: usize = 10240;
@@ -389,7 +389,7 @@ impl DatasetWriter {
                 self.len
             )));
         }
-        let file_path = self.path.join(format!("{}.bin", self.columns.len()));
+        let file_path = column_file(&self.path, self.columns.len());
         let mut file = OpenOptions::new()
             .create_new(true)
             .write(true)
@@ -431,7 +431,7 @@ impl DatasetWriter {
         self.write_schema()?;
         for index in 0..self.columns.len() {
             self.files
-                .push(open_append(&self.path.join(format!("{index}.bin")))?);
+                .push(open_append(&column_file(&self.path, index))?);
         }
         Ok(())
     }
@@ -441,7 +441,7 @@ impl DatasetWriter {
         let schema = Schema::from_path(&self.path)?;
         let mut len = None;
         for def in schema.columns() {
-            let file_path = self.path.join(format!("{}.bin", def.index));
+            let file_path = column_file(&self.path, def.index);
             let bytes = std::fs::metadata(&file_path)
                 .map(|m| m.len() as usize)
                 .unwrap_or(0);
@@ -515,7 +515,7 @@ pub fn truncate_locked<P: AsRef<Path>>(path: P, nrows: usize, lock: Lock) -> Res
     for def in schema.columns() {
         let file = OpenOptions::new()
             .write(true)
-            .open(path.join(format!("{}.bin", def.index)))?;
+            .open(column_file(path, def.index))?;
         let bytes = file.metadata()?.len() as usize;
         let size = def.dtype.size_bytes();
         if bytes % size != 0 || rows.is_some_and(|rows| rows != bytes / size) {

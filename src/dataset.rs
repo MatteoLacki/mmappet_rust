@@ -13,7 +13,7 @@ use ndarray::ArrayView1;
 use crate::column::{cast, cast_mut, Column, Typed};
 use crate::dtype::{DType, MmappetType};
 use crate::error::{MmappetError, Result};
-use crate::schema::Schema;
+use crate::schema::{column_file, Schema};
 
 /// A dataset mapped read-only. Columns can be borrowed (`get`), shared (`typed`, `column`
 /// clones) or moved out (`take`); shared and moved columns outlive the `Dataset`.
@@ -118,6 +118,15 @@ impl Dataset {
 
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// The file holding column `name`, for reading it other than through its map.
+    pub fn column_path(&self, name: &str) -> Result<PathBuf> {
+        let def = self
+            .schema
+            .get(name)
+            .ok_or_else(|| MmappetError::ColumnNotFound(name.to_string()))?;
+        Ok(column_file(&self.path, def.index))
     }
 }
 
@@ -253,7 +262,7 @@ fn open_column_files(path: &Path, schema: &Schema, writable: bool) -> Result<Vec
     let mut files = Vec::with_capacity(schema.len());
     let mut expected_len: Option<usize> = None;
     for def in schema.columns() {
-        let file_path = path.join(format!("{}.bin", def.index));
+        let file_path = column_file(path, def.index);
         if !file_path.exists() {
             return Err(MmappetError::MissingColumnFile(file_path));
         }

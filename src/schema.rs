@@ -2,10 +2,15 @@
 
 use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::dtype::DType;
 use crate::error::{MmappetError, Result};
+
+/// The file of column `index` in the dataset at `dir`.
+pub(crate) fn column_file(dir: &Path, index: usize) -> PathBuf {
+    dir.join(format!("{index}.bin"))
+}
 
 /// A single column definition from the schema.
 #[derive(Debug, Clone)]

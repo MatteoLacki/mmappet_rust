@@ -19,14 +19,24 @@ use num_complex::Complex;
 use crate::dtype::{DType, MmappetType};
 use crate::error::Result;
 
-/// One column, mapped read-only. Clones share the map, which lives as long as any clone,
-/// so a column can outlive the `Dataset` it came from.
+/// One column: its file mapped read-only and shared, so a page the kernel drops is reread
+/// from the file (an empty file has no map). Clones share the map, which lives as long as
+/// any clone, so a column can outlive the `Dataset` it came from.
 #[derive(Clone)]
 pub struct Column {
     /// `None` for an empty file, which cannot be mapped.
     map: Option<Arc<Mmap>>,
     dtype: DType,
     len: usize,
+}
+
+impl std::fmt::Debug for Column {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Column")
+            .field("dtype", &self.dtype)
+            .field("len", &self.len)
+            .finish()
+    }
 }
 
 impl Column {
@@ -133,6 +143,12 @@ impl<T: MmappetType> Typed<T> {
 
     pub fn column(&self) -> &Column {
         &self.column
+    }
+}
+
+impl<T> std::fmt::Debug for Typed<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("Typed").field(&self.column).finish()
     }
 }
 
