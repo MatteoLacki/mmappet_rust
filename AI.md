@@ -1,5 +1,9 @@
 # AI.md — mmappet (Rust)
 
+History lives in `AI_CHANGELOG.md` (append-only; read it for *why* something changed).
+This file is present tense: a change rewrites its sentence here and appends an entry
+there, in the same commit.
+
 Agent instructions for this repo. `CLAUDE.md`, `AGENTS.md`, `GEMINI.md` and
 `.github/copilot-instructions.md` are symlinks to this file; edit only this one.
 
@@ -63,5 +67,5 @@ write or edit of a `.rs` file, as a post-edit hook where the agent has hooks (Cl
 
 ## Docs
 
-Present tense, only what the code cannot say, about 60 lines; history goes in commit
-messages. Ask before adding a doc file.
+Present tense, only what the code cannot say, about 60 lines; history goes in
+`AI_CHANGELOG.md`, appended in the same commit. Ask before adding a doc file.
